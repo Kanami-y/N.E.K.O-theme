@@ -22,8 +22,8 @@ import io
 import json
 import os
 import re
-import urllib.parse
 import threading
+import urllib.parse
 import zipfile
 from datetime import datetime
 from pathlib import Path

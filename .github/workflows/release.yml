@@ -1,0 +1,21 @@
+name: Release N.E.K.O Plugin
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    uses: Project-N-E-K-O/N.E.K.O/.github/workflows/plugin-market-release.yml@main
+    with:
+      plugin-id: neko_theme_studio
+      plugin-directory: plugin
+      neko-repository: Project-N-E-K-O/N.E.K.O
+      neko-ref: main

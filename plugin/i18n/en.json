@@ -1,0 +1,36 @@
+{
+  "plugin.name": "Theme Studio",
+  "plugin.description": "Visually edit N.E.K.O colour variables — chat bubbles, chat window, input area, panels and global accents — with alpha and dark-mode support. Saves a palette that is served over HTTP and applied live by the app-side loader.",
+  "plugin.short_description": "Visually edit and save an N.E.K.O theme palette (dark mode and alpha included).",
+
+  "entries.get_theme.name": "Get current theme",
+  "entries.get_theme.description": "Returns the current palette: light variables, dark variables, name, enabled flag and last-modified time.",
+  "entries.apply_theme.name": "Apply theme",
+  "entries.apply_theme.description": "Merges the given CSS variables into the current palette and atomically writes theme.json.",
+  "entries.apply_theme.param.vars": "Light-mode variable map: --nts-* name → colour/length value",
+  "entries.apply_theme.param.dark_vars": "Dark-mode variable map: --nts-* name → colour/length value",
+  "entries.apply_theme.param.name": "Theme name, at most 60 characters",
+  "entries.apply_theme.param.enabled": "Whether the theme is enabled; when false the app-side loader removes its injected style",
+  "entries.reset_theme.name": "Reset theme",
+  "entries.reset_theme.description": "Writes the built-in default palette back to theme.json (clears every --nts-* variable, restoring the native N.E.K.O look).",
+  "entries.export_theme.name": "Export theme",
+  "entries.export_theme.description": "Serialises the current palette to JSON text for the user to copy or share.",
+  "entries.import_theme.name": "Import theme",
+  "entries.import_theme.description": "Parses and validates palette JSON text, then applies it wholesale (invalid entries are dropped).",
+  "entries.import_theme.param.payload": "Palette JSON text",
+
+  "messages.loaded": "Current theme loaded.",
+  "messages.applied": "Theme applied and written to theme.json.",
+  "messages.reset": "Default theme restored.",
+  "messages.exported": "Theme exported.",
+  "messages.imported": "Theme imported.",
+  "messages.rejected": "Some entries were rejected as unsafe and were not written to disk.",
+  "messages.empty_palette": "The palette is empty, so N.E.K.O uses its native appearance.",
+
+  "errors.invalid_json": "The imported content is not valid JSON.",
+  "errors.not_object": "The imported content must be a JSON object.",
+  "errors.no_vars": "The imported content is missing the vars / dark_vars fields.",
+  "errors.empty_payload": "The imported content is empty.",
+  "errors.write_failed": "Failed to write the theme.",
+  "errors.read_failed": "Failed to read the theme."
+}

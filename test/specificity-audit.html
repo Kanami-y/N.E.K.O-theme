@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>NTS specificity audit</title>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  if (q.get('theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+})();
+</script>
+<script>/*NTS_TARGETS_JS*/</script>
+<link rel="stylesheet" href="/static/css/index.css">
+<link rel="stylesheet" href="/static/css/music_ui.css">
+<link rel="stylesheet" href="/static/css/subtitle.css">
+<link rel="stylesheet" href="/static/css/agent-plugin-views.css">
+<link rel="stylesheet" href="/static/css/dark-mode.css">
+<link rel="stylesheet" href="/static/css/yui-guide.css">
+<link rel="stylesheet" href="/static/react/neko-chat/neko-chat-window.css">
+<!--NTS_CSS_HOOK-->
+</head>
+<body>
+<div id="nts-mount"></div>
+<pre id="nts-out" style="display:none"></pre>
+<script>
+/* Same DOM as test/fixture.html so selectors match identically. */
+var FIXTURES = {
+  bubbleUser: '<div class="message user"><div class="message-block"><div class="message-block-text">hi</div><div class="message-block-markdown">text <a href="#">link</a> <code class="message-markdown-inline-code">c</code> <pre class="message-markdown-pre">p</pre></div></div></div>',
+  bubbleGemini: '<div class="message gemini"><div class="message-block"><div class="message-block-markdown">ai text</div></div></div>',
+  bubbleReact: '<div class="message-list">' +
+    '<div class="message-row message-row-user"><div class="message-stack"><div class="message-bubble message-bubble-user"><div class="message-block"><div class="message-block-markdown">u</div></div></div></div></div>' +
+    '<div class="message-row"><div class="message-stack"><div class="message-bubble message-bubble-assistant"><div class="message-block"><div class="message-block-markdown">a <a href="#">l</a></div></div></div></div></div>' +
+    '<div class="message-bubble message-bubble-tool">t</div>' +
+    '<div class="message-bubble message-bubble-system">s</div>' +
+    '<div class="message-block message-block-image">i</div>' +
+    '<div class="message-block message-block-status tone-info">info</div>' +
+    '<div class="message-block message-block-status tone-success">ok</div>' +
+    '<div class="message-block message-block-status tone-warning">warn</div>' +
+    '<div class="message-block message-block-status tone-error">err</div>' +
+    '<div class="message-block message-block-link">lk</div>' +
+    '<code class="message-markdown-inline-code">ic</code>' +
+    '<pre class="message-markdown-pre"><code>x</code></pre>' +
+    '</div>',
+  shell: '<div id="react-chat-window-root"><div id="react-chat-window-backdrop"></div><div id="react-chat-window-shell">' +
+    '<div class="window-topbar"><span class="window-title">t</span></div>' +
+    '<div class="chat-window"><div class="chat-body"></div></div>' +
+    '<div class="composer-panel">panel</div>' +
+    '<div id="text-input-area">' +
+      '<div class="composer-input-shell"><textarea class="composer-input" placeholder="p"></textarea></div>' +
+      '<button class="composer-tool-btn"></button><button class="composer-icon-button"></button>' +
+      '<button class="composer-emoji-btn"></button><button class="composer-translate-btn"></button>' +
+      '<button class="composer-overflow-btn"></button><button class="composer-galgame-btn"></button>' +
+      '<button class="composer-tool-clear-btn"></button><button class="composer-attachment-remove"></button>' +
+      '<button class="send-button-circle"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></button>' +
+      '<div class="composer-attachments"></div>' +
+      '<div class="composer-visit-bar">v<span class="composer-visit-bar-badge">b</span><button class="composer-visit-bar-action">a</button></div>' +
+    '</div>' +
+    '<div class="composer-icon-popover">ip</div>' +
+    '<div class="composer-overflow-popover">op</div>' +
+    '<div class="composer-overflow-menu">om</div>' +
+    '<div class="composer-galgame-options"><div class="composer-galgame-option">o</div></div>' +
+    '<div class="composer-galgame-slot"></div>' +
+    '</div></div>',
+  modals: '<div class="modal-overlay"><div class="modal-dialog"><h3 class="modal-title">t</h3><div class="modal-header">h</div></div></div>' +
+    '<div class="modal-overlay modal-overlay-theater"></div>' +
+    '<div class="modal-dialog modal-dialog-theater"></div>',
+  rec: '<div class="proactive-recommendation"><div class="proactive-recommendation-bubble"><div class="proactive-recommendation-card">c</div></div>' +
+    '<div class="music-recommendation-bubble"><div class="music-recommendation-icon">i</div></div>' +
+    '<div class="system-chip"><span class="system-chip-time">12:00</span><div class="system-chip-content">c</div></div>' +
+    '<div class="compact-export-history-bubble">h</div>' +
+    '<div class="compact-export-preview-bubble">p</div>' +
+    '</div>',
+  legacy: '<div id="textInputBox"><button id="sendButton">s</button><button id="textSendButton">t</button></div>',
+  pluginLayer: '<div id="agent-plugin-views"><div id="agent-plugin-content"><div class="agent-plugin-view">v</div></div></div>',
+  linky: '<div id="nts-linky"><a href="#">plain link</a></div>'
+};
+var host = document.getElementById('nts-mount');
+for (var k in FIXTURES) {
+  var w = document.createElement('div');
+  w.className = 'nts-fixture nts-fixture-' + k; w.innerHTML = FIXTURES[k]; host.appendChild(w);
+}
+
+/* --- specificity: (a=#id, b=.class/[attr]/:pseudo-class, c=element/::pseudo-element) --- */
+function stripStrings(s) { return s.replace(/"[^"]*"|'[^']*'/g, '""'); }
+function specOf(sel) {
+  /* take the most specific compound of a comma list, and drop combinator context we cannot
+     evaluate: we only need an upper bound comparison, so use the LAST compound. */
+  var parts = sel.split(',').map(function (s) { return s.trim(); });
+  var best = { a: 0, b: 0, c: 0, s: '' };
+  parts.forEach(function (p) {
+    var s = stripStrings(p), a = 0, b = 0, c = 0;
+    var idRe = /#[A-Za-z_][\w-]*/g; a = (s.match(idRe) || []).length;
+    s = s.replace(idRe, ' ');
+    var attrRe = /\[[^\]]*\]/g; b += (s.match(attrRe) || []).length;
+    s = s.replace(attrRe, ' ');
+    var pcRe = /:[a-zA-Z-]+(\([^)]*\))?/g;
+    var pcs = s.match(pcRe) || [];
+    /* ::before/::after are pseudo-ELEMENTS -> column c */
+    var pe = pcs.filter(function (x) { return x.indexOf('::') === 0 || /^:(before|after|first-line|first-letter|placeholder|selection|marker|backdrop)$/.test(x); });
+    b += pcs.length - pe.length; c += pe.length;
+    s = s.replace(pcRe, ' ');
+    var clsRe = /\.[A-Za-z_][\w-]*/g; b += (s.match(clsRe) || []).length;
+    s = s.replace(clsRe, ' ');
+    var elRe = /(?<![:\w-])([a-zA-Z][\w-]*|\*)/g; c += (s.match(elRe) || []).length;
+    var cand = { a: a, b: b, c: c, s: p };
+    if (cand.a > best.a || (cand.a === best.a && (cand.b > best.b || (cand.b === best.b && cand.c >= best.c)))) best = cand;
+  });
+  return best;
+}
+function cmp(x, y) { return x.a - y.a || x.b - y.b || x.c - y.c; }
+
+function splitPseudo(sel) {
+  var i = sel.indexOf('::');
+  return i >= 0 ? { base: sel.slice(0, i), pseudo: sel.slice(i) } : { base: sel, pseudo: null };
+}
+function isOursRule(rule) {
+  try { return (rule.parentStyleSheet && (rule.parentStyleSheet.href || '').indexOf('neko-theme-studio.css') >= 0); }
+  catch (e) { return false; }
+}
+
+function auditTarget(t) {
+  var sp = splitPseudo(t.sel);
+  if (/:(hover|focus|focus-visible|focus-within|active)\b/.test(sp.base)) return null;
+  var el = null;
+  try { el = sp.base ? document.querySelector(sp.base) : document.body; } catch (e) { return null; }
+  if (!el) return null;
+
+  var props = [t.prop];
+  if (t.prop === 'border-radius') {
+    props = ['border-top-left-radius', 'border-top-right-radius', 'border-bottom-right-radius', 'border-bottom-left-radius'];
+  }
+  var cands = [];
+  for (var i = 0; i < document.styleSheets.length; i++) {
+    var sh = document.styleSheets[i], rules;
+    try { rules = sh.cssRules || sh.rules; } catch (e) { continue; }
+    if (!rules) continue;
+    var href = sh.href || '(inline)';
+    for (var j = 0; j < rules.length; j++) {
+      var r = rules[j];
+      if (r.type !== 1 && r.selectorText === undefined) continue;   /* skip @media wrappers: handled below */
+      collect(r, href);
+    }
+    function collect(r, href) {
+      if (r.cssRules && r.selectorText === undefined) {   /* @media / @supports */
+        for (var k = 0; k < r.cssRules.length; k++) collect(r.cssRules[k], href);
+        return;
+      }
+      if (!r.selectorText) return;
+      var s = r.selectorText;
+      /* only rules that could match this element; pseudo-element selectors still count,
+         so strip ::pseudo for the matches() test */
+      var test = s.replace(/::[a-zA-Z-]+(\([^)]*\))?/g, '');
+      var matched = false;
+      try {
+        var list = test.split(',').map(function (x) { return x.trim(); });
+        for (var q = 0; q < list.length && !matched; q++) {
+          var one = list[q];
+          if (!one) continue;
+          if (sp.pseudo && one !== sp.base && one.indexOf(sp.base) < 0) { /* keep it simple, still test */ }
+          try { if (el.matches(one)) matched = true; } catch (e2) { if (el.matches(sp.base)) matched = true; }
+        }
+      } catch (e3) { matched = true; }
+      if (!matched) return;
+      for (var p = 0; p < props.length; p++) {
+        var v = r.style.getPropertyValue(props[p]);
+        if (!v) continue;
+        cands.push({
+          sel: s, prop: props[p], val: v,
+          important: r.style.getPropertyPriority(props[p]) === 'important',
+          spec: specOf(s), ours: isOursRule(r), sheet: href.split('/').pop()
+        });
+      }
+    }
+  }
+  return { target: t.sel + ' | ' + t.prop, var: t.v, props: props, cands: cands };
+}
+
+function run() {
+  var out = { theme: document.documentElement.getAttribute('data-theme') || 'light', rows: [], winners: [] };
+  try {
+    for (var i = 0; i < NTS_TARGETS.length; i++) {
+      var t = NTS_TARGETS[i];
+      if (t.aux) continue;
+      var a = auditTarget(t);
+      if (!a) continue;
+      /* winner per property: important first, then specificity, then source order (we do not
+         track order precisely; ties are reported so a human can see them) */
+      a.props.forEach(function (prop) {
+        var cs = a.cands.filter(function (c) { return c.prop === prop; });
+        if (!cs.length) return;
+        cs.sort(function (x, y) {
+          if (x.important !== y.important) return x.important ? -1 : 1;
+          var d = cmp(y.spec, x.spec); if (d) return d;
+          return (y.ours ? 1 : 0) - (x.ours ? 1 : 0);
+        });
+        var top = cs[0];
+        var oursTop = cs.filter(function (c) { return c.ours; })[0];
+        var outranked = oursTop && (top.important && (!oursTop.important || cmp(top.spec, oursTop.spec) > 0));
+        var amb = cs.filter(function (c) {
+          return c.important === top.important && cmp(c.spec, top.spec) === 0;
+        }).length > 1;
+        if (outranked || amb) {
+          out.winners.push({
+            target: a.target, prop: prop, ourVar: a.var,
+            ours: oursTop ? { sel: oursTop.sel, spec: fmt(oursTop.spec), important: oursTop.important, sheet: oursTop.sheet } : null,
+            top: { sel: top.sel, spec: fmt(top.spec), important: top.important, val: top.val, sheet: top.sheet, ours: !!top.ours },
+            outranked: !!outranked, ambiguous: !!amb,
+            all: cs.slice(0, 6).map(function (c) {
+              return (c.ours ? 'OURS ' : '     ') + fmt(c.spec) + (c.important ? ' !imp' : '     ') + '  ' + c.sel + '  [' + c.sheet + '] = ' + c.val;
+            })
+          });
+        }
+      });
+    }
+  } catch (e) { out.error = String((e && e.stack) || e); }
+  document.getElementById('nts-out').textContent = JSON.stringify(out);
+  document.title = 'NTS-DONE';
+}
+function fmt(s) { return '(' + s.a + ',' + s.b + ',' + s.c + ')'; }
+
+if (document.readyState === 'complete') run();
+else window.addEventListener('load', run, false);
+</script>
+</body>
+</html>

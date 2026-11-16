@@ -1,0 +1,191 @@
+﻿{
+  "url": "http://127.0.0.1:48911/chat",
+  "body": "electron-chat-window subtitle-web-host react-chat-adapter-active galgame-mode-enabled react-chat-window-open",
+  "checks": [],
+  "errors": [],
+  "sheetFound": true,
+  "sheetDisabled": false,
+  "dynamicStyle": false,
+  "gateAttrs": [],
+  "claim1": {
+    "paletteEmpty": true,
+    "diffCount": 2,
+    "diffs": [
+      {
+        "sel": ".chat-body",
+        "prop": "backgroundColor",
+        "sheetOn": "rgba(28, 28, 46, 0.91)",
+        "sheetOff": "rgba(0, 0, 0, 0)"
+      },
+      {
+        "sel": ".composer-galgame-btn",
+        "prop": "color",
+        "sheetOn": "rgba(68, 183, 254, 0.5)",
+        "sheetOff": "rgb(68, 183, 254)"
+      }
+    ],
+    "on": {
+      "tag": "sheet-on",
+      "rows": [
+        {
+          "sel": ".chat-body",
+          "prop": "backgroundColor",
+          "how": "real",
+          "val": "rgba(28, 28, 46, 0.91)"
+        },
+        {
+          "sel": ".composer-galgame-btn",
+          "prop": "color",
+          "how": "real",
+          "val": "rgba(68, 183, 254, 0.5)"
+        },
+        {
+          "sel": ".send-button-circle",
+          "prop": "backgroundColor",
+          "how": "real",
+          "val": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "sel": ".proactive-recommendation-card",
+          "prop": "borderTopColor",
+          "how": "absent",
+          "val": null
+        },
+        {
+          "sel": ".window-topbar",
+          "prop": "backgroundColor",
+          "how": "real",
+          "val": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "sel": "#text-input-area",
+          "prop": "backgroundColor",
+          "how": "real",
+          "val": "rgba(40, 40, 40, 0.65)"
+        },
+        {
+          "sel": "#react-chat-window-shell",
+          "prop": "borderTopLeftRadius",
+          "how": "real",
+          "val": "0px"
+        },
+        {
+          "sel": ".composer-tool-btn",
+          "prop": "backgroundColor",
+          "how": "real",
+          "val": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "sel": ".message-bubble-user",
+          "prop": "backgroundColor",
+          "how": "absent",
+          "val": null
+        },
+        {
+          "sel": ".system-chip",
+          "prop": "backgroundColor",
+          "how": "absent",
+          "val": null
+        }
+      ]
+    },
+    "off": {
+      "tag": "sheet-off",
+      "rows": [
+        {
+          "sel": ".chat-body",
+          "prop": "backgroundColor",
+          "how": "real",
+          "val": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "sel": ".composer-galgame-btn",
+          "prop": "color",
+          "how": "real",
+          "val": "rgb(68, 183, 254)"
+        },
+        {
+          "sel": ".send-button-circle",
+          "prop": "backgroundColor",
+          "how": "real",
+          "val": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "sel": ".proactive-recommendation-card",
+          "prop": "borderTopColor",
+          "how": "absent",
+          "val": null
+        },
+        {
+          "sel": ".window-topbar",
+          "prop": "backgroundColor",
+          "how": "real",
+          "val": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "sel": "#text-input-area",
+          "prop": "backgroundColor",
+          "how": "real",
+          "val": "rgba(40, 40, 40, 0.65)"
+        },
+        {
+          "sel": "#react-chat-window-shell",
+          "prop": "borderTopLeftRadius",
+          "how": "real",
+          "val": "0px"
+        },
+        {
+          "sel": ".composer-tool-btn",
+          "prop": "backgroundColor",
+          "how": "real",
+          "val": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "sel": ".message-bubble-user",
+          "prop": "backgroundColor",
+          "how": "absent",
+          "val": null
+        },
+        {
+          "sel": ".system-chip",
+          "prop": "backgroundColor",
+          "how": "absent",
+          "val": null
+        }
+      ]
+    },
+    "verdict": "FAIL"
+  },
+  "chatBodyChain": [
+    "section.chat-body.chat-body-compact-surface",
+    "section.chat-window.chat-surface-mode-compact",
+    "main.app-shell.chat-surface-mode-compact",
+    "div",
+    "div",
+    "div",
+    "body.electron-chat-window.subtitle-web-host.react-chat-adapter-active.galgame-mode-enabled.react-chat-window-open"
+  ],
+  "hasCompactToolFan": true,
+  "loaderPresent": true,
+  "internalsKeys": [
+    "isSafeValue",
+    "sanitizeVars",
+    "themeUrl"
+  ],
+  "claim4": {
+    "isSafeValue_chat_opacity_05": false,
+    "err": null,
+    "sanitizeVars_result": {},
+    "keptCount": 0,
+    "afterApply": {
+      "dynamicPresent": true,
+      "text": ":root{--nts-user-bubble-bg:#00c853}",
+      "gateChatOpacity": false,
+      "gateUserBubble": true,
+      "factor": "1"
+    },
+    "afterClear": {
+      "dynamicPresent": false
+    }
+  }
+}

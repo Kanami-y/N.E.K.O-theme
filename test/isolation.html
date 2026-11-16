@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>NTS isolation diagnostic</title>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  if (q.get('theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+})();
+</script>
+<link rel="stylesheet" href="/static/css/index.css" id="nts-native-1">
+<link rel="stylesheet" href="/static/css/music_ui.css" id="nts-native-2">
+<link rel="stylesheet" href="/static/css/subtitle.css" id="nts-native-3">
+<link rel="stylesheet" href="/static/css/agent-plugin-views.css" id="nts-native-4">
+<link rel="stylesheet" href="/static/css/dark-mode.css" id="nts-native-5">
+<link rel="stylesheet" href="/static/css/yui-guide.css" id="nts-native-6">
+<link rel="stylesheet" href="/static/react/neko-chat/neko-chat-window.css" id="nts-native-7">
+<link rel="stylesheet" href="/static/css/neko-theme-studio.css" id="nts-ours">
+</head>
+<body>
+<div id="nts-mount"></div>
+<pre id="nts-out" style="display:none"></pre>
+<script>
+var FIXTURES = {
+  shell: '<div id="react-chat-window-root"><div id="react-chat-window-shell">' +
+    '<div class="window-topbar"><span class="window-title">t</span></div>' +
+    '<div class="chat-window"><div class="chat-body"></div></div>' +
+    '<div class="composer-panel">panel</div>' +
+    '<div id="text-input-area">' +
+      '<div class="composer-input-shell"><textarea class="composer-input" placeholder="p"></textarea></div>' +
+      '<button class="composer-tool-btn"></button><button class="composer-icon-button"></button>' +
+      '<button class="composer-overflow-btn"></button><button class="composer-galgame-btn"></button>' +
+      '<button class="composer-attachment-remove"></button>' +
+      '<button class="send-button-circle"></button>' +
+      '<div class="composer-attachments"></div>' +
+      '<div class="composer-visit-bar">v<span class="composer-visit-bar-badge">b</span><button class="composer-visit-bar-action">a</button></div>' +
+    '</div>' +
+    '<div class="composer-icon-popover">ip</div>' +
+    '<div class="composer-overflow-popover">op</div>' +
+    '<div class="composer-galgame-options"><div class="composer-galgame-option">o</div></div>' +
+    '</div></div>',
+  legacy: '<div id="textInputBox"><button id="sendButton">s</button><button id="sendTextButton">t</button></div>',
+  bubbleReact: '<div class="message-list">' +
+    '<div class="message-bubble message-bubble-user">u</div>' +
+    '<div class="message-bubble message-bubble-assistant">a</div>' +
+    '<div class="message-bubble message-bubble-tool">t</div>' +
+    '<div class="message-bubble message-bubble-system">s</div>' +
+    '</div>',
+  rec: '<div class="proactive-recommendation"><div class="proactive-recommendation-bubble"><div class="proactive-recommendation-card">c</div></div>' +
+    '<div class="system-chip"><span class="system-chip-time">12:00</span></div>' +
+    '<div class="compact-export-history-bubble">h</div></div>'
+};
+var host = document.getElementById('nts-mount');
+for (var k in FIXTURES) {
+  var w = document.createElement('div'); w.innerHTML = FIXTURES[k]; host.appendChild(w);
+}
+
+var SENT = { color: 'rgb(1, 2, 3)', length: '7px', blur: 'blur(7px)', number: '0.37', font: 'NTSProbeFont, monospace' };
+
+/* targets under investigation: [selector, prop, varName, kind] */
+var CASES = [
+  ['#text-input-area', 'background-color', '--nts-input-bg', 'color'],
+  ['.composer-input-shell', 'background-color', '--nts-input-bg', 'color'],
+  ['.composer-input-shell', 'border-top-color', '--nts-input-border', 'color'],
+  ['.composer-tool-btn', 'background-color', '--nts-button-bg', 'color'],
+  ['.composer-icon-button', 'background-color', '--nts-button-bg', 'color'],
+  ['.composer-attachment-remove', 'background-color', '--nts-button-bg', 'color'],
+  ['.composer-galgame-option', 'background-color', '--nts-chip-bg', 'color'],
+  ['.composer-visit-bar-action', 'color', '--nts-chip-text', 'color'],
+  ['#sendButton', 'background-color', '--nts-send-bg', 'color'],
+  ['.window-topbar', 'backdrop-filter', '--nts-chat-blur', 'blur'],
+  ['.composer-icon-button', 'backdrop-filter', '--nts-chat-blur', 'blur'],
+  ['.composer-panel', 'box-shadow', '--nts-shadow', 'color'],
+  ['.message-bubble-user', 'box-shadow', '--nts-shadow', 'color'],
+  ['.composer-input-shell', 'border-radius', '--nts-radius', 'length'],
+  ['.composer-icon-button', 'border-radius', '--nts-radius', 'length']
+];
+
+function specOf(sel) {
+  var s = sel.replace(/"[^"]*"|'[^']*'/g, '');
+  var a = (s.match(/#[A-Za-z_][\w-]*/g) || []).length; s = s.replace(/#[A-Za-z_][\w-]*/g, ' ');
+  var b = (s.match(/\[[^\]]*\]/g) || []).length; s = s.replace(/\[[^\]]*\]/g, ' ');
+  var pcs = s.match(/:[a-zA-Z-]+(\([^)]*\))?/g) || [];
+  var pe = pcs.filter(function (x) { return x.indexOf('::') === 0; });
+  b += pcs.length - pe.length; var c = pe.length; s = s.replace(/:[a-zA-Z-]+(\([^)]*\))?/g, ' ');
+  b += (s.match(/\.[A-Za-z_][\w-]*/g) || []).length; s = s.replace(/\.[A-Za-z_][\w-]*/g, ' ');
+  c += (s.match(/[a-zA-Z][\w-]*/g) || []).length;
+  return { a: a, b: b, c: c };
+}
+function fmtSp(x) { return '(' + x.a + ',' + x.b + ',' + x.c + ')'; }
+
+function valOf(sel, prop) {
+  var el = document.querySelector(sel);
+  if (!el) return 'MISSING';
+  return String(getComputedStyle(el).getPropertyValue(prop)).trim() || 'EMPTY';
+}
+
+/* every declaration of prop across every sheet, with the raw selector and crude specificity */
+function declsFor(prop) {
+  var out = [];
+  for (var i = 0; i < document.styleSheets.length; i++) {
+    var sh = document.styleSheets[i], rules;
+    try { rules = sh.cssRules || sh.rules; } catch (e) { continue; }
+    if (!rules) continue;
+    var href = (sh.href || 'inline').split('/').pop();
+    (function walk(list, href, inMedia) {
+      for (var j = 0; j < list.length; j++) {
+        var r = list[j];
+        if (r.cssRules && r.selectorText === undefined) { walk(r.cssRules, href, (inMedia ? inMedia + '>' : '') + (r.conditionText || r.cssText.split('{')[0]).trim()); continue; }
+        if (!r.selectorText) continue;
+        var v = r.style.getPropertyValue(prop);
+        if (!v) continue;
+        out.push({ sel: r.selectorText, val: v,
+                   imp: r.style.getPropertyPriority(prop) === 'important',
+                   sp: specOf(r.selectorText), sheet: href,
+                   media: inMedia || '', ours: href.indexOf('neko-theme-studio') >= 0 });
+      }
+    })(rules, href, '');
+  }
+  return out;
+}
+
+function run() {
+  var out = { theme: document.documentElement.getAttribute('data-theme') || 'light', cases: [], error: null };
+  try {
+    var rs = document.documentElement.style;
+    CASES.forEach(function (c) {
+      var sel = c[0], prop = c[1], v = c[2], kind = c[3];
+      var rec = { sel: sel, prop: prop, varName: v, kind: kind };
+      rec.sheets = document.styleSheets.length;
+      /* 1. baseline, no var set */
+      rec.base = valOf(sel, prop);
+      /* 2. with var set and all sheets present */
+      rs.setProperty(v, SENT[kind]);
+      rec.withVarAllSheets = valOf(sel, prop);
+      /* 3. with var set, only our sheet active */
+      var saved = [];
+      for (var i = 1; i <= 7; i++) {
+        var el = document.getElementById('nts-native-' + i);
+        if (el) { saved.push([el, el.disabled]); el.disabled = true; }
+      }
+      rec.withVarOursOnly = valOf(sel, prop);
+      saved.forEach(function (p) { p[0].disabled = p[1]; });
+      /* 4. does our sheet even contain a rule whose selector matches this element? */
+      rec.ourSheetRules = 0;
+      var ourCount = 0;
+      for (var s = 0; s < document.styleSheets.length; s++) {
+        var sh = document.styleSheets[s];
+        if ((sh.href || '').indexOf('neko-theme-studio.css') < 0) continue;
+        var rules; try { rules = sh.cssRules || sh.rules; } catch (e) { continue; }
+        rec.ourSheetRuleCount = rules.length;
+        for (var j = 0; j < rules.length; j++) {
+          var r = rules[j];
+          if (!r.selectorText) continue;
+          var t = r.selectorText.replace(/::[a-zA-Z-]+(\([^)]*\))?/g, '');
+          var list = t.split(',');
+          for (var q = 0; q < list.length; q++) {
+            var one = list[q].trim();
+            try { if (document.querySelector(sel) && document.querySelector(sel).matches(one)) { ourCount++; } } catch (e2) {}
+          }
+        }
+      }
+      rec.ourRulesMatchingElement = ourCount;
+      /* 5. all declarations of this prop, sorted: important first then specificity desc */
+      var ds = declsFor(prop);
+      ds.sort(function (x, y) {
+        if (x.imp !== y.imp) return x.imp ? -1 : 1;
+        var d = (y.sp.a - x.sp.a) || (y.sp.b - x.sp.b) || (y.sp.c - x.sp.c);
+        return d;
+      });
+      rec.decls = ds.slice(0, 12).map(function (d) {
+        return (d.ours ? 'OURS ' : '     ') + (d.imp ? '!imp ' : '     ') + fmtSp(d.sp) + ' ' + d.sel + '  [' + d.sheet + ']' + (d.media ? ' @' + d.media : '') + ' = ' + d.val;
+      });
+      rec.ourDecls = ds.filter(function (d) { return d.ours; }).map(function (d) {
+        return (d.imp ? '!imp ' : '     ') + fmtSp(d.sp) + ' ' + d.sel + ' = ' + d.val;
+      });
+      rs.removeProperty(v);
+      out.cases.push(rec);
+    });
+  } catch (e) { out.error = String((e && e.stack) || e); }
+  document.getElementById('nts-out').textContent = JSON.stringify(out);
+  document.title = 'NTS-DONE';
+}
+if (document.readyState === 'complete') run();
+else window.addEventListener('load', run, false);
+</script>
+</body>
+</html>

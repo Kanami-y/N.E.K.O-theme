@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>NTS cascade investigator</title>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  if (q.get('theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+})();
+</script>
+<link rel="stylesheet" href="/static/css/index.css">
+<link rel="stylesheet" href="/static/css/music_ui.css">
+<link rel="stylesheet" href="/static/css/subtitle.css">
+<link rel="stylesheet" href="/static/css/agent-plugin-views.css">
+<link rel="stylesheet" href="/static/css/dark-mode.css">
+<link rel="stylesheet" href="/static/css/yui-guide.css">
+<link rel="stylesheet" href="/static/react/neko-chat/neko-chat-window.css">
+<link rel="stylesheet" href="/static/css/neko-theme-studio.css">
+</head>
+<body>
+<pre id="nts-out" style="display:none"></pre>
+<script>
+/*!
+ * cascade.html -- "why did my declaration lose?" investigator.
+ *
+ *   /static/_nts_cascade.html?sel=<selector>&prop=<property>[&theme=dark][&sentinel=1]
+ *
+ * It materialises one element matching the selector, optionally sets every --nts-* sentinel,
+ * then walks every loaded stylesheet, collects every declaration of <property> whose selector
+ * matches the element, and ranks them exactly the way the cascade does:
+ *      !important  >  specificity  >  later sheet / later rule
+ * The top entry is the winner, and the computed value (from getComputedStyle) must agree with
+ * it. A mismatch means the ranking model is wrong (shadow DOM, inline style, animation...).
+ */
+(function () {
+  function specOf(sel) {
+    var best = { a: 0, b: 0, c: 0, s: '' };
+    String(sel).split(',').forEach(function (p) {
+      var s = p.replace(/"[^"]*"|'[^']*'/g, '"x"').trim();
+      var a = (s.match(/#[\w-]+/g) || []).length; s = s.replace(/#[\w-]+/g, ' ');
+      var b = 0, c = 0;
+      (s.match(/::?[a-zA-Z-]+(\([^)]*\))?/g) || []).forEach(function (x) {
+        if (x.indexOf('::') === 0) { c++; return; }
+        if (/^:not\(|^:is\(|^:has\(/.test(x)) {
+          var sub = specOf(x.slice(x.indexOf('(') + 1, x.lastIndexOf(')')));
+          a += sub.a; b += sub.b; c += sub.c;
+        } else if (x.indexOf(':where(') !== 0) b++;
+      });
+      s = s.replace(/::?[a-zA-Z-]+(\([^)]*\))?/g, ' ');
+      b += (s.match(/\.[\w-]+/g) || []).length; s = s.replace(/\.[\w-]+/g, ' ');
+      b += (s.match(/\[[^\]]*\]/g) || []).length; s = s.replace(/\[[^\]]*\]/g, ' ');
+      c += (s.match(/[a-zA-Z][\w-]*/g) || []).length;
+      if (a > best.a || (a === best.a && (b > best.b || (b === best.b && c > best.c)))) best = { a: a, b: b, c: c, s: p.trim() };
+    });
+    return best;
+  }
+
+  /* build one element out of the rightmost compound of a selector */
+  function makeElement(sel) {
+    var parts = sel.split(',').map(function (s) { return s.trim(); });
+    var base = parts[0].split(/\s+|>/).filter(Boolean).pop() || 'div';
+    base = base.replace(/::?[a-zA-Z-]+(\([^)]*\))?/g, '');
+    var tag = (base.match(/^[a-zA-Z][\w-]*/) || ['div'])[0];
+    var el = document.createElement(tag);
+    (base.match(/#[\w-]+/g) || []).forEach(function (x) { el.id = x.slice(1); });
+    var cls = (base.match(/\.[\w-]+/g) || []).map(function (x) { return x.slice(1); });
+    if (cls.length) el.className = cls.join(' ');
+    (base.match(/\[([^\]]*)\]/g) || []).forEach(function (x) {
+      var m = /^\[([\w-]+)(?:[~|^$*]?=("([^"]*)"|'([^']*)'|[^\]]*))?\]$/.exec(x);
+      if (!m) return;
+      var v = m[3] != null ? m[3] : (m[4] != null ? m[4] : (m[2] || ''));
+      el.setAttribute(m[1], v.replace(/^["']|["']$/g, ''));
+    });
+    return el;
+  }
+
+  function collect(el, prop) {
+    var hits = [], order = 0;
+
+    function walk(list, atStack) {
+      for (var j = 0; j < list.length; j++) {
+        var r = list[j];
+        if (r.cssRules && !r.selectorText) {
+          walk(r.cssRules, atStack.concat([(r.conditionText || r.cssText || '').slice(0, 60)]));
+          continue;
+        }
+        if (!r.selectorText) continue;
+        var txt = r.style && r.style.getPropertyValue(prop);
+        if (!txt) continue;
+        var imp = r.style.getPropertyPriority(prop) === 'important';
+        var matched = false;
+        try { matched = el.matches(r.selectorText); } catch (e) { matched = false; }
+        if (!matched) continue;
+        var sp = specOf(r.selectorText);
+        hits.push({
+          sheet: href, sel: r.selectorText, val: txt, imp: imp,
+          spec: sp.a + ',' + sp.b + ',' + sp.c, sp: sp, order: order++,
+          at: atStack.slice()
+        });
+      }
+    }
+
+    for (var i = 0; i < document.styleSheets.length; i++) {
+      var sh = document.styleSheets[i], href = (sh.href || '(inline)');
+      var rules;
+      try { rules = sh.cssRules; } catch (e) { continue; }
+      if (!rules) continue;
+      walk(rules, []);
+    }
+    hits.sort(function (x, y) {
+      if (x.imp !== y.imp) return x.imp ? -1 : 1;
+      if (x.sp.a !== y.sp.a) return y.sp.a - x.sp.a;
+      if (x.sp.b !== y.sp.b) return y.sp.b - x.sp.b;
+      if (x.sp.c !== y.sp.c) return y.sp.c - x.sp.c;
+      return y.order - x.order;
+    });
+    return hits;
+  }
+
+  function run() {
+    var q = new URLSearchParams(location.search);
+    var sel = q.get('sel') || '';
+    var prop = q.get('prop') || '';
+    var out = { sel: sel, prop: prop, sentinel: q.get('sentinel') === '1', theme: document.documentElement.getAttribute('data-theme') || 'light' };
+    try {
+      var el = makeElement(sel);
+      el.id = el.id || 'nts-cascade-target';
+      document.body.appendChild(el);
+
+      if (out.sentinel) {
+        var rs = document.documentElement.style;
+        ['--nts-input-bg', '--nts-input-border', '--nts-input-text', '--nts-button-bg', '--nts-button-hover-bg',
+         '--nts-send-bg', '--nts-chip-bg', '--nts-chip-text', '--nts-accent', '--nts-radius', '--nts-shadow',
+         '--nts-chat-blur', '--nts-link', '--nts-highlight', '--nts-user-bubble-bg', '--nts-panel-bg'].forEach(function (v) {
+          rs.setProperty(v, /radius|blur/.test(v) ? '7px' : (/shadow/.test(v) ? '0 0 3px rgb(1, 2, 3)' : 'rgb(1, 2, 3)'));
+        });
+      }
+      out.target = el.tagName + (el.id ? '#' + el.id : '') + (el.className ? '.' + String(el.className).split(' ').join('.') : '');
+      out.varOnRoot = getComputedStyle(document.documentElement).getPropertyValue('--nts-input-bg').trim();
+      out.varOnEl = getComputedStyle(el).getPropertyValue('--nts-input-bg').trim();
+      out.computed = getComputedStyle(el).getPropertyValue(prop).trim();
+      out.candidates = collect(el, prop).slice(0, 12).map(function (h) {
+        return { imp: h.imp, spec: h.spec, sheet: h.sheet.split('/').pop(), sel: h.sel, val: h.val, at: h.at };
+      });
+      out.winner = out.candidates[0] || null;
+    } catch (e) {
+      out.error = String((e && e.stack) || e);
+    }
+    document.getElementById('nts-out').textContent = JSON.stringify(out);
+  }
+
+  if (document.readyState === 'complete') run();
+  else window.addEventListener('load', run, false);
+})();
+</script>
+</body>
+</html>

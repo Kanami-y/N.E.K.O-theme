@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>NTS live</title>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  if (q.get('theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+  if (q.get('base')) localStorage.setItem('neko.themeStudio.baseUrl', q.get('base'));
+  window.__NTS_WAIT__ = parseInt(q.get('wait') || '1500', 10);
+})();
+</script>
+<!-- 顺序与 templates/chat.html 完全一致；我方 css/loader 在 dark-mode.css 之后（= 补丁位置） -->
+<link rel="stylesheet" href="/static/css/index.css">
+<link rel="stylesheet" href="/static/css/music_ui.css">
+<link rel="stylesheet" href="/static/css/subtitle.css">
+<link rel="stylesheet" href="/static/css/agent-plugin-views.css">
+<link rel="stylesheet" href="/static/css/dark-mode.css">
+<link rel="stylesheet" href="/static/css/yui-guide.css">
+<link rel="stylesheet" href="/static/react/neko-chat/neko-chat-window.css">
+<!--NTS_CSS_HOOK-->
+</head>
+<body>
+<style>*,*::before,*::after{transition:none!important;animation:none!important}</style>
+<div id="nts-mount"></div>
+<pre id="nts-out" style="display:none"></pre>
+<script>
+/*!
+ * live.html -- end-to-end acceptance harness for the theme plugin delivery path:
+ *   plugin panel -> apply_theme -> theme.json -> neko-theme-studio.js -> computed style
+ *
+ * Loads the REAL deployed stylesheet + REAL deployed loader (never reimplementations) and
+ * materialises DOM matching the app's real markup. css=0 gives the untouched native baseline;
+ * css=1 measures the delivered artefact. Equal rows between the two = zero-change invariant.
+ *
+ * Params: theme=light|dark  css=0|1  base=<plugin origin>  wait=<ms>
+ */
+var FIX = {
+  bubbles:
+    '<div class="message-list">' +
+      '<div class="message-row message-row-user"><div class="message-stack"><div class="message-bubble message-bubble-user">' +
+        '<div class="message-block message-block-text"><span>u</span></div></div></div></div>' +
+      '<div class="message-row"><div class="message-stack"><div class="message-bubble message-bubble-assistant">' +
+        '<div class="message-block message-block-text"><span>a</span></div>' +
+        '<div class="message-block message-block-markdown"><a href="#">link</a><code>c</code></div>' +
+        '<div class="message-block message-block-status tone-info">s</div></div></div></div>' +
+      '<div class="message user"><div class="message-block"><span>legacy</span></div></div>' +
+      '<div class="message gemini"><div class="message-block"><span>legacy ai</span></div></div>' +
+    '</div>',
+  chat:
+    '<div id="react-chat-window-root"><div id="react-chat-window-shell">' +
+      '<div class="window-topbar"><span class="window-title">t</span></div>' +
+      '<div class="chat-window"><div class="chat-body"></div></div>' +
+      '<div class="composer-panel"><a href="#">p</a></div>' +
+      '<div class="composer-icon-popover">ip</div>' +
+      '<div class="composer-overflow-popover">op</div>' +
+      '<div class="system-chip">chip</div>' +
+      '<div class="compact-export-history-bubble">h</div>' +
+      '<div class="proactive-recommendation-card">r</div>' +
+      '<div class="composer-galgame-option">g</div>' +
+      '<div class="modal-overlay"><div class="modal-dialog"><div class="modal-title">m</div></div></div>' +
+    '</div></div>',
+  input:
+    '<div id="text-input-area">' +
+      '<div class="composer-input-shell"><textarea class="composer-input" placeholder="p"></textarea></div>' +
+      '<button class="composer-tool-btn">t</button>' +
+      '<button class="composer-icon-button">i</button>' +
+      '<button class="composer-attachment-remove">x</button>' +
+      '<button class="composer-visit-bar-action">v</button>' +
+      '<button class="composer-visit-bar-badge">b</button>' +
+      '<button class="send-button-circle"></button>' +
+    '</div>' +
+    '<div id="textInputBox"><button id="sendButton">s</button><button id="textSendButton">t</button></div>'
+};
+
+var host = document.getElementById('nts-mount');
+for (var k in FIX) { var w = document.createElement('div'); w.innerHTML = FIX[k]; host.appendChild(w); }
+
+/* 全部量测点：按用户选定的 7 个类别分组 */
+var GROUPS = {
+  'g1-user-bubble':    [['.message-bubble-user', 'background-color'], ['.message-bubble-user', 'color'], ['.message.user', 'background-color']],
+  'g2-ai-bubble':      [['.message-bubble-assistant', 'background-color'], ['.message-bubble-assistant', 'color'], ['.message.gemini', 'background-color']],
+  'g3-chat-window': [['.chat-body', 'background-color'], ['#react-chat-window-shell', 'background-color'], ['.window-topbar', 'backdrop-filter'], ['.window-topbar', 'background-color']],
+  'g4-input':       [['.composer-input-shell', 'background-color'], ['.composer-input-shell', 'border-top-color'], ['.composer-input', 'color'], ['.composer-input', 'font-size'], ['#sendButton', 'background-color'], ['#textSendButton', 'background-color'], ['.composer-tool-btn', 'background-color'], ['.composer-icon-button', 'background-color']],
+  'g5-panels':     [['.composer-icon-popover', 'background-color'], ['.composer-overflow-popover', 'background-color'], ['.modal-dialog', 'background-color'], ['.modal-title', 'color'], ['.modal-overlay', 'background-color'], ['.composer-galgame-option', 'background-color']],
+  'g6-chips':  [['.system-chip', 'background-color'], ['.system-chip', 'color'], ['.compact-export-history-bubble', 'background-color'], ['.proactive-recommendation-card', 'background-color'], ['.composer-visit-bar-action', 'color'], ['.composer-visit-bar-badge', 'color']],
+  'g7-global':         [['.message-bubble-user', 'border-top-left-radius'], ['.message-bubble-user', 'border-bottom-right-radius'], ['.message-block-markdown a', 'color'], ['.composer-panel a', 'color'], ['a', 'color']]
+};
+
+var READ = [];
+Object.keys(GROUPS).forEach(function (g) { GROUPS[g].forEach(function (p) { READ.push([g, p[0], p[1]]); }); });
+
+function cs(sel, prop) {
+  var el;
+  try { el = document.querySelector(sel); } catch (e) { return 'BADSEL'; }
+  if (!el) return 'MISSING';
+  var v = getComputedStyle(el).getPropertyValue(prop).trim();
+  return v || 'EMPTY';
+}
+
+function snapshot() {
+  var de = document.documentElement, o = { attrs: {}, vars: {}, rows: {} };
+  var gates = [];
+  for (var i = 0; i < de.attributes.length; i++) {
+    var n = de.attributes[i].name;
+    if (n.indexOf('data-nts') === 0) gates.push(n);
+  }
+  o.attrs.theme = de.getAttribute('data-theme');
+  o.attrs.active = de.getAttribute('data-nts-active');
+  o.attrs.gates = gates.sort();
+  ['--nts-user-bubble-bg', '--nts-accent', '--nts-radius', '--nts-chat-blur', '--nts-input-bg', '--nts-panel-bg', '--nts-chip-bg', '--nts-link'].forEach(function (v) {
+    o.vars[v] = getComputedStyle(de).getPropertyValue(v).trim();
+  });
+  READ.forEach(function (r) { o.rows[r[0] + '||' + r[1] + '||' + r[2]] = cs(r[1], r[2]); });
+  o.hasStyleEl = !!document.getElementById('nts-dynamic');
+  return o;
+}
+
+function finish(out) {
+  // Two channels on purpose: #nts-out textContent, plus a base64 attribute on <html>.
+  // The attribute survives anything that might disturb the <pre> (and base64 cannot be
+  // mistaken for markup), so a diagnostic can never silently lose the measurement.
+  var s;
+  try { s = JSON.stringify(out); } catch (e) { s = '{"stringifyError":"' + String(e) + '"}'; }
+  var de = document.documentElement;
+  try {
+    de.setAttribute('data-nts-len', String(s.length));
+    de.setAttribute('data-nts-payload', btoa(unescape(encodeURIComponent(s))));
+  } catch (e) { /* ignore */ }
+  var el = document.getElementById('nts-out');
+  if (!el) {
+    el = document.createElement('pre');
+    el.id = 'nts-out';
+    (document.body || de).appendChild(el);
+  }
+  el.textContent = s;
+  document.title = 'NTS-DONE';
+}
+
+/* Any throw must still leave the measurement behind: a blank #nts-out previously
+   showed up as "every row changed" and produced false failures. */
+var OUT = { rows: null, vars: null, attrs: null, error: null, api: false, started: false, thrown: null };
+window.onerror = function (msg, src, line, col, err) {
+  OUT.thrown = String(msg) + ' @' + line + ':' + col + (err && err.stack ? '\n' + err.stack : '');
+  finish(OUT);
+  return false;
+};
+window.addEventListener('unhandledrejection', function (ev) {
+  OUT.thrown = 'unhandledrejection: ' + String((ev && ev.reason && (ev.reason.stack || ev.reason.message)) || ev.reason);
+  finish(OUT);
+}, false);
+function flush() { OUT.done = true; finish(OUT); }
+
+/* Cascade winner chain for one (sel, prop) -- tells us who actually won and why.
+   Needed because "our rule is present and matches" is not enough evidence; the
+   stylesheet with the highest !important specificity wins. */
+function specificity(sel) {
+  var best = [0, 0, 0];
+  sel.split(',').forEach(function (s) {
+    var a = 0, b = 0, c = 0;
+    s = s.replace(/\[[^\]]*\]/g, function () { a++; return ''; });
+    s = s.replace(/::[a-z-]+(\([^)]*\))?/g, function () { c++; return ''; });
+    s = s.replace(/#[A-Za-z0-9_-]+/g, function () { a++; return ''; });
+    s = s.replace(/\.[A-Za-z0-9_-]+/g, function () { b++; return ''; });
+    s = s.replace(/:[a-z-]+(\([^)]*\))?/g, function () { b++; return ''; });
+    c += (s.match(/[a-zA-Z][a-zA-Z0-9-]*/g) || []).length;
+    if (a > best[0] || (a === best[0] && (b > best[1] || (b === best[1] && c > best[2])))) best = [a, b, c];
+  });
+  return best;
+}
+function winnersFor(sel, prop) {
+  var el;
+  try { el = document.querySelector(sel); } catch (e) { return [{ err: 'bad selector' }]; }
+  if (!el) return [{ err: 'element missing' }];
+  var out = [];
+  for (var i = 0; i < document.styleSheets.length; i++) {
+    var sh = document.styleSheets[i], rules;
+    try { rules = sh.cssRules; } catch (e) { continue; }
+    var href = (sh.href || '(inline)').replace(/^https?:\/\/[^/]+/, '');
+    for (var j = 0; j < rules.length; j++) {
+      var r = rules[j];
+      if (!r.selectorText || !r.style) continue;
+      var v = r.style.getPropertyValue(prop);
+      if (!v) continue;
+      var m = false;
+      try { m = el.matches(r.selectorText); } catch (e) { continue; }
+      if (!m) continue;
+      out.push({
+        sheet: href, sel: r.selectorText, val: v,
+        imp: r.style.getPropertyPriority(prop) === 'important',
+        spec: specificity(r.selectorText).join(',')
+      });
+    }
+  }
+  out.sort(function (A, B) {
+    if (A.imp !== B.imp) return A.imp ? -1 : 1;
+    var sa = A.spec.split(',').map(Number), sb = B.spec.split(',').map(Number);
+    for (var k = 0; k < 3; k++) if (sb[k] !== sa[k]) return sb[k] - sa[k];
+    return 0;
+  });
+  return out.slice(0, 4);
+}
+
+function run() {
+  var out = OUT;
+  out.groups = Object.keys(GROUPS);
+  try {
+    var snap = function () {
+      // Never let a diagnostic throw away the measurement: the winner chain is
+      // optional evidence, the rows are the result.
+      var s = snapshot();
+      out.rows = s.rows; out.vars = s.vars; out.attrs = s.attrs; out.hasStyleEl = s.hasStyleEl;
+      try {
+        out.winners = {
+          'message.user|background-color': winnersFor('.message.user', 'background-color'),
+          'chat-body|background-color': winnersFor('.chat-body', 'background-color')
+        };
+      } catch (e) { out.winnersError = String((e && e.stack) || e); }
+      flush();
+    };
+    var api = window.NekoThemeStudio;
+    out.api = !!api;
+    // __NTS_CSS__ is set by the injected script tag the runner writes at the head
+    // hook; absent == native baseline run.
+    out.withCss = !!window.__NTS_CSS__;
+    if (!window.__NTS_CSS__) { snap(); return; }          // 基线：完全不加载我方产物
+    if (!api) { out.error = 'NekoThemeStudio missing'; snap(); return; }
+    api.refresh();
+    setTimeout(snap, window.__NTS_WAIT__);                 // 等 loader 跨源取回 theme.json
+  } catch (e) {
+    out.error = String((e && e.stack) || e);
+    flush();
+  }
+}
+
+/* Watchdog: the measurement must exist even if the loader never settles. Runs as a
+   timer, so it is outside run()'s try/catch by design. */
+function watchdog() {
+  if (OUT.done) return;
+  OUT.watchdog = true;
+  try {
+    var s = snapshot();
+    OUT.rows = s.rows; OUT.vars = s.vars; OUT.attrs = s.attrs; OUT.hasStyleEl = s.hasStyleEl;
+  } catch (e) { OUT.watchdogError = String((e && e.stack) || e); }
+  flush();
+}
+
+if (document.readyState === 'complete') setTimeout(run, 300);
+else window.addEventListener('load', function () { setTimeout(run, 300); }, false);
+setTimeout(watchdog, 9000);
+</script>
+</body>
+</html>

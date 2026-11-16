@@ -1,0 +1,36 @@
+{
+  "plugin.name": "主题工坊",
+  "plugin.description": "在插件面板中可视化编辑 N.E.K.O 聊天气泡、聊天窗口、输入区、面板与全局的颜色变量（支持透明度与暗色模式），保存为调色板并经 HTTP 提供给应用侧加载器实时应用。",
+  "plugin.short_description": "可视化编辑并保存 N.E.K.O 主题调色板（含暗色与透明度）。",
+
+  "entries.get_theme.name": "读取当前主题",
+  "entries.get_theme.description": "返回当前调色板：亮色变量、暗色变量、名称、启用状态与最后修改时间。",
+  "entries.apply_theme.name": "应用主题",
+  "entries.apply_theme.description": "把给定的 CSS 变量合并进当前调色板并原子写入 theme.json。",
+  "entries.apply_theme.param.vars": "亮色模式变量表：--nts-* 变量名 → 颜色/长度值",
+  "entries.apply_theme.param.dark_vars": "暗色模式变量表：--nts-* 变量名 → 颜色/长度值",
+  "entries.apply_theme.param.name": "主题名称，最多 60 个字符",
+  "entries.apply_theme.param.enabled": "是否启用主题；false 时应用侧会移除注入的样式",
+  "entries.reset_theme.name": "恢复默认主题",
+  "entries.reset_theme.description": "把内置默认调色板写回 theme.json（清空所有 --nts-* 变量，回到 N.E.K.O 原生外观）。",
+  "entries.export_theme.name": "导出主题",
+  "entries.export_theme.description": "把当前调色板序列化为 JSON 文本，供用户复制保存或分享。",
+  "entries.import_theme.name": "导入主题",
+  "entries.import_theme.description": "解析并校验一段调色板 JSON 文本，合法后整体应用（非法条目一律丢弃）。",
+  "entries.import_theme.param.payload": "调色板 JSON 文本",
+
+  "messages.loaded": "已读取当前主题。",
+  "messages.applied": "主题已应用并写入 theme.json。",
+  "messages.reset": "已恢复默认主题。",
+  "messages.exported": "主题已导出。",
+  "messages.imported": "主题已导入。",
+  "messages.rejected": "部分条目因不合规被拒绝，未写入磁盘。",
+  "messages.empty_palette": "当前调色板为空，N.E.K.O 使用原生外观。",
+
+  "errors.invalid_json": "导入内容不是合法 JSON。",
+  "errors.not_object": "导入内容必须是一个 JSON 对象。",
+  "errors.no_vars": "导入内容缺少 vars / dark_vars 字段。",
+  "errors.empty_payload": "导入内容为空。",
+  "errors.write_failed": "写入主题失败。",
+  "errors.read_failed": "读取主题失败。"
+}

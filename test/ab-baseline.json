@@ -1,0 +1,14 @@
+{
+  "comment": "Persistent record of (selector, property) pairs where the synthetic fixture's measured 'native' value is WRONG on the real /chat page, proven by test/expr-realab.js with an empty palette. gen-css.js gates every pair listed here (no fallback => the rule only fires once the user actually sets that variable). This file must never be shrunk automatically: the A/B harness measures the currently-deployed stylesheet, so once a pair is gated the harness passes and the evidence would otherwise disappear on the next build.",
+  "schema": 1,
+  "reason_light_shell": "fixture measured 14px, real page renders 22px: the 14px rule is `body:not(.electron-chat-window)...` and the real /chat body carries .electron-chat-window, so it never applies there.",
+  "reason_light_input": "fixture matched an @media (max-width:768px) branch and could not see the app's runtime-injected <style> layer (which wins with !important): real value is rgba(255,255,255,0.5) light / rgba(40,40,40,0.65) dark.",
+  "reason_dark_shell_border": "the app's runtime <style> sets border-top-color: rgba(127,144,170,0.25) !important on .composer-input-shell, beating the stylesheet the fixture measured.",
+  "diffs": [
+    { "theme": "light", "sel": "#react-chat-window-shell", "prop": "border-radius", "fixture": "14px", "real": "22px" },
+    { "theme": "dark", "sel": "#react-chat-window-shell", "prop": "border-radius", "fixture": "14px", "real": "22px" },
+    { "theme": "light", "sel": "#text-input-area", "prop": "background-color", "fixture": "rgba(255, 255, 255, 0.4)", "real": "rgba(255, 255, 255, 0.5)" },
+    { "theme": "dark", "sel": "#text-input-area", "prop": "background-color", "fixture": "rgba(40, 40, 40, 0.55)", "real": "rgba(40, 40, 40, 0.65)" },
+    { "theme": "dark", "sel": ".composer-input-shell", "prop": "border-top-color", "fixture": "rgba(255, 255, 255, 0.08)", "real": "rgba(127, 144, 170, 0.25)" }
+  ]
+}

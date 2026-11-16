@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>NTS computed-style probe</title>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  if (q.get('theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+})();
+</script>
+<script>/*NTS_TARGETS_JS*/</script>
+<!--
+  量测前必须关掉过渡与动画。
+  证据：哨兵模式下恰好 9 个目标读回「原生值」，它们无一例外都命中
+  .composer-input-shell{transition:...background...}、.composer-tool-btn{transition:background .15s}、
+  .composer-attachment-remove{transition:background .15s,...}、#sendButton 等同型规则。
+  同步读取计算样式时过渡停在第 0 帧（=起始值=原生值），于是把「量测时序」误读成「样式表没生效」。
+  关掉过渡不改变任何静态计算值，只让量测可复现。放在最前面，native 与 themed 两次量测条件一致。
+-->
+<style>*,*::before,*::after{transition:none!important;animation:none!important}</style>
+<!-- 原生样式表，顺序与 templates/chat.html 完全一致；我方样式表由测量脚本插在 dark-mode.css 之后 -->
+<!--
+  原生样式表不再用 <link> 引入：新版宿主不再按任意路径放行页面文件，探针页改用
+  file:// 打开 —— 跨源链路到 48911 的 CSS 会被判 SecurityError、cssRules 读不到
+  （实测 ntsRules 恒 0）。改由 probe.ps1 先把 CSS 抓成文本，按原顺序内联成
+  <style data-nts-src="...">。顺序必须与 templates/chat.html 一致；
+  我方样式表仍由测量脚本插在 dark-mode.css 之后（现在也走同一内联通道）。
+-->
+<!--NTS_CSS_INLINE-->
+<!--NTS_CSS_HOOK-->
+</head>
+<body>
+<div id="nts-mount"></div>
+<pre id="nts-out" style="display:none"></pre>
+<script>
+/* 每段 fixture = 真实类名/结构的 DOM 片段（类名与结构照 research/SELECTORS.md） */
+var FIXTURES = {
+  bubbleUser: '<div class="message user"><div class="message-block"><div class="message-block-text">hi</div><div class="message-block-markdown">text <a href="#">link</a> <code class="message-markdown-inline-code">c</code> <pre class="message-markdown-pre">p</pre></div></div></div>',
+  bubbleGemini: '<div class="message gemini"><div class="message-block"><div class="message-block-markdown">ai text</div></div></div>',
+  bubbleReact: '<div class="message-list">' +
+    '<div class="message-row message-row-user"><div class="message-stack"><div class="message-bubble message-bubble-user"><div class="message-block"><div class="message-block-markdown">u</div></div></div></div></div>' +
+    '<div class="message-row"><div class="message-stack"><div class="message-bubble message-bubble-assistant"><div class="message-block"><div class="message-block-markdown">a <a href="#">l</a></div></div></div></div></div>' +
+    '<div class="message-bubble message-bubble-tool">t</div>' +
+    '<div class="message-bubble message-bubble-system">s</div>' +
+    '<div class="message-block message-block-image">i</div>' +
+    '<div class="message-block message-block-status tone-info">info</div>' +
+    '<div class="message-block message-block-status tone-success">ok</div>' +
+    '<div class="message-block message-block-status tone-warning">warn</div>' +
+    '<div class="message-block message-block-status tone-error">err</div>' +
+    '<div class="message-block message-block-link">lk</div>' +
+    '<code class="message-markdown-inline-code">ic</code>' +
+    '<pre class="message-markdown-pre"><code>x</code></pre>' +
+    '</div>',
+  shell: '<div id="react-chat-window-root"><div id="react-chat-window-backdrop"></div><div id="react-chat-window-shell">' +
+    '<div class="window-topbar"><span class="window-title">t</span></div>' +
+    '<div class="chat-window"><div class="chat-body"></div></div>' +
+    '<div class="composer-panel">panel <a href="#">in-panel link</a></div>' +
+    '<div id="text-input-area">' +
+      '<div class="composer-input-shell"><textarea class="composer-input" placeholder="p"></textarea></div>' +
+      '<button class="composer-tool-btn"></button><button class="composer-icon-button"></button>' +
+      '<button class="composer-emoji-btn"></button><button class="composer-translate-btn"></button>' +
+      '<button class="composer-overflow-btn"></button><button class="composer-galgame-btn"></button>' +
+      '<button class="composer-tool-clear-btn"></button><button class="composer-attachment-remove"></button>' +
+      '<button class="send-button-circle"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></button>' +
+      '<div class="composer-attachments"></div>' +
+      '<div class="composer-visit-bar">v<span class="composer-visit-bar-badge">b</span><button class="composer-visit-bar-action">a</button></div>' +
+    '</div>' +
+    '<div class="composer-icon-popover">ip</div>' +
+    '<div class="composer-overflow-popover">op</div>' +
+    '<div class="composer-overflow-menu">om</div>' +
+    '<div class="composer-galgame-options"><div class="composer-galgame-option">o</div></div>' +
+    '<div class="composer-galgame-slot"></div>' +
+    '</div></div>',
+  modals: '<div class="modal-overlay"><div class="modal-dialog"><h3 class="modal-title">t</h3><div class="modal-header">h</div></div></div>' +
+    '<div class="modal-overlay modal-overlay-theater"></div>' +
+    '<div class="modal-dialog modal-dialog-theater"></div>',
+  rec: '<div class="proactive-recommendation"><div class="proactive-recommendation-bubble"><div class="proactive-recommendation-card">c</div></div>' +
+    '<div class="music-recommendation-bubble"><div class="music-recommendation-icon">i</div></div>' +
+    '<div class="system-chip"><span class="system-chip-time">12:00</span><div class="system-chip-content">c</div></div>' +
+    '<div class="compact-export-history-bubble">h</div>' +
+    '<div class="compact-export-preview-bubble">p</div>' +
+    '</div>',
+  /* 紧凑/galgame 形态的真实消息层（用户实际看到的聊天记录）。
+     结构与类名照 resources\bin\static\react\neko-chat\neko-chat-window.iife.js 的
+     Aoe()（行类名）与历史气泡渲染取证：
+       article.compact-export-history-message.is-<role> > div.compact-export-history-bubble
+         > div.compact-export-history-meta + div.compact-export-history-content
+           > .message-block-text[.message-block-text-plain] | .message-block-markdown
+     tool 角色渲染成 .is-visit-peer（背景是 linear-gradient）。 */
+  historyCompact: '<section class="compact-export-history-anchor"><div class="compact-export-history-scroll">' +
+    '<div class="compact-export-history-scroll-content">' +
+    '<article class="compact-export-history-message is-user" data-message-role="user" role="listitem">' +
+      '<div class="compact-export-history-bubble">' +
+        '<div class="compact-export-history-meta"><span class="compact-export-history-author">u</span><span class="compact-export-history-time">12:00</span></div>' +
+        '<div class="compact-export-history-content">' +
+          '<div class="message-block message-block-text message-block-text-plain">u plain</div>' +
+          '<div class="message-block message-block-markdown"><p>u p</p><h1>u h</h1><blockquote>u q</blockquote>' +
+          '<table><thead><tr><th>u th</th></tr></thead><tbody><tr><td>u td</td></tr></tbody></table><a href="#">u a</a></div>' +
+        '</div>' +
+      '</div>' +
+    '</article>' +
+    '<article class="compact-export-history-message is-assistant" data-message-role="assistant" role="listitem">' +
+      '<div class="compact-export-history-bubble">' +
+        '<div class="compact-export-history-meta"><span class="compact-export-history-author">a</span></div>' +
+        '<div class="compact-export-history-content">' +
+          '<div class="message-block message-block-text message-block-text-plain">a plain</div>' +
+          '<div class="message-block message-block-markdown"><p>a p</p><h1>a h</h1><blockquote>a q</blockquote>' +
+          '<table><thead><tr><th>a th</th></tr></thead><tbody><tr><td>a td</td></tr></tbody></table></div>' +
+        '</div>' +
+      '</div>' +
+    '</article>' +
+    '<article class="compact-export-history-message is-visit-peer" data-message-role="tool" role="listitem">' +
+      '<div class="compact-export-history-bubble"><div class="compact-export-history-content">' +
+        '<div class="message-block message-block-text">t plain</div></div></div>' +
+    '</article>' +
+    '<article class="compact-export-history-message is-system" data-message-role="system" role="listitem">' +
+      '<div class="compact-export-history-bubble"><div class="compact-export-history-content">' +
+        '<div class="message-block message-block-text">s plain</div>' +
+        '<div class="message-block message-block-markdown">s md</div></div></div>' +
+    '</article>' +
+    '</div></div></section>',
+  /* 导出预览层（点「导出图片」先看到的那一屏）。类名照 iife 的 It() 取证：
+       section.compact-export-preview-region > div.compact-export-preview-messages
+         > article.compact-export-preview-message.is-<role> > div.compact-export-preview-bubble
+            > div.compact-export-preview-meta + div.compact-export-preview-content
+    它和 history 层一样是写死颜色（#273042 / #d0e7ffb3 / 渐变 / #607086），所以也需要
+    角色作用域的目标，否则「文字颜色」在这一屏同样不生效。 */
+  previewCompact: '<section class="compact-export-preview-region"><div class="compact-export-preview-messages">' +
+    '<article class="compact-export-preview-message is-user" data-message-role="user" role="listitem">' +
+      '<div class="compact-export-preview-bubble">' +
+        '<div class="compact-export-preview-meta"><span class="compact-export-preview-author">u</span><span class="compact-export-preview-time">12:00</span></div>' +
+        '<div class="compact-export-preview-content">' +
+          '<div class="message-block message-block-text message-block-text-plain">u plain</div>' +
+          '<div class="message-block message-block-markdown"><p>u p</p><h1>u h</h1><blockquote>u q</blockquote>' +
+          '<table><thead><tr><th>u th</th></tr></thead><tbody><tr><td>u td</td></tr></tbody></table></div>' +
+        '</div>' +
+      '</div>' +
+    '</article>' +
+    '<article class="compact-export-preview-message is-assistant" data-message-role="assistant" role="listitem">' +
+      '<div class="compact-export-preview-bubble">' +
+        '<div class="compact-export-preview-meta"><span class="compact-export-preview-author">a</span></div>' +
+        '<div class="compact-export-preview-content">' +
+          '<div class="message-block message-block-text message-block-text-plain">a plain</div>' +
+          '<div class="message-block message-block-markdown"><p>a p</p><h1>a h</h1><blockquote>a q</blockquote>' +
+          '<table><thead><tr><th>a th</th></tr></thead><tbody><tr><td>a td</td></tr></tbody></table></div>' +
+        '</div>' +
+      '</div>' +
+    '</article>' +
+    '<article class="compact-export-preview-message is-visit-peer" data-message-role="tool" role="listitem">' +
+      '<div class="compact-export-preview-bubble"><div class="compact-export-preview-content">' +
+        '<div class="message-block message-block-text">t plain</div></div></div>' +
+    '</article>' +
+    '<article class="compact-export-preview-message is-system" data-message-role="system" role="listitem">' +
+      '<div class="compact-export-preview-bubble"><div class="compact-export-preview-content">' +
+        '<div class="message-block message-block-text">s plain</div>' +
+        '<div class="message-block message-block-markdown">s md</div></div></div>' +
+    '</article>' +
+    '</div></section>',
+  legacy: '<div id="textInputBox"><button id="sendButton">s</button><button id="textSendButton">t</button></div>',
+  pluginLayer: '<div id="agent-plugin-views"><div id="agent-plugin-content"><div class="agent-plugin-view">v</div></div></div>',
+  linky: '<div id="nts-linky"><a href="#">plain link</a></div>'
+};
+
+var host = document.getElementById('nts-mount');
+for (var k in FIXTURES) {
+  var w = document.createElement('div');
+  w.className = 'nts-fixture nts-fixture-' + k;
+  w.innerHTML = FIXTURES[k];
+  host.appendChild(w);
+}
+
+/* ---------- 量测 ----------
+ * UNAVAILABLE 的四种原因必须区分开，否则会把测量失败当成「原生没样式」：
+ *   NO-PSEUDO-STATE  选择器含 :hover/:focus/:active 等无法在静态页触发的状态
+ *   UNQUERYABLE      ::selection 之类 getComputedStyle 根本不支持
+ *   MISSING-ELEMENT  选择器在该 fixture 里没有对应元素（要修 fixture，不是修 CSS）
+ *   BAD-SELECTOR     选择器语法错误
+ */
+function splitPseudo(sel) {
+  var i = sel.indexOf('::');
+  if (i >= 0) return { base: sel.slice(0, i), pseudo: sel.slice(i) };
+  return { base: sel, pseudo: null };
+}
+
+/* ---------- 关键：区分「原生真的声明了」与「只是继承来的」 ----------
+ * getComputedStyle 返回的是**解析后的最终值**，它包含继承。所以当一个选择器在原生
+ * 样式表里根本没有 color/background 的声明时，量到的只是从祖先继承来的值——这个值
+ * 依赖 DOM 上下文，fixture 里的上下文与真实应用页可能不同，于是把它当回退值写进
+ * CSS 就会在真实页面上改变未配置的外观。
+ *  实测事故（独立验证者发现）：.message-block-text 在原生样式表里**零** color 声明，
+ *  fixture 量到 rgb(255,255,255) 并被当成回退值写死，导致真实亮色页面里
+ *  白字白底（对比度 1.00），聊天正文完全不可读。
+ * 因此这里额外记录 declared：'yes' | 'no'，生成器对 declared==='no' 的目标一律门控，
+ * 永不把继承值当作回退值。
+ *
+ * ⚠ 简写陷阱（实测）：CSSOM **不会**把含 var() 的简写拆成长属性。
+ *   `.card { border: 1px solid var(--line) }` 的
+ *       r.style.getPropertyValue('border-color')      -> ''   （空！）
+ *       r.style.getPropertyValue('border')            -> '1px solid var(--line)'
+ *   但 `border-top: 2px solid rgb(9,9,9)` 的 getPropertyValue('border-top-color')
+ *   却**能**取到。也就是说「取不到长属性」不能证明「原生没声明」。
+ *   若不处理，会把 .proactive-recommendation-card 这类**原生确实声明了**的目标
+ *   误判成「继承值」而过度门控。因此这里同时检查长属性与其所属简写。
+ */
+var NTS_SHORTHANDS = {
+  'background-color': ['background'],
+  'border-color':     ['border'],
+  'border-top-color':    ['border', 'border-top'],
+  'border-right-color':  ['border', 'border-right'],
+  'border-bottom-color': ['border', 'border-bottom'],
+  'border-left-color':   ['border', 'border-left'],
+  'border-radius':       ['border-radius'],
+  'border-top-left-radius':     ['border-radius', 'border-top-left-radius'],
+  'border-top-right-radius':    ['border-radius', 'border-top-right-radius'],
+  'border-bottom-right-radius': ['border-radius', 'border-bottom-right-radius'],
+  'border-bottom-left-radius':  ['border-radius', 'border-bottom-left-radius'],
+  'font-size':   ['font'],
+  'font-family': ['font'],
+  'outline-color': ['outline'],
+  'box-shadow': ['box-shadow'],
+  'color': ['color']
+};
+
+function propsToCheck(prop) {
+  var list = [prop].concat(NTS_SHORTHANDS[prop] || []);
+  var seen = {}, out = [];
+  for (var i = 0; i < list.length; i++) { if (!seen[list[i]]) { seen[list[i]] = 1; out.push(list[i]); } }
+  return out;
+}
+
+function declaredFor(sel, prop) {
+  var s = splitPseudo(sel), el = null;
+  try { el = s.base ? document.querySelector(s.base) : document.body; } catch (e) { return { declared: 'error' }; }
+  if (!el) return { declared: 'no-element' };
+  var probe = propsToCheck(prop);
+  var hits = [];
+  for (var i = 0; i < document.styleSheets.length; i++) {
+    var ss = document.styleSheets[i];
+    var href = ss.href || '';
+    if (href.indexOf('neko-theme-studio.css') >= 0) continue;   /* 只看原生表 */
+    var rules; try { rules = ss.cssRules; } catch (e) { continue; }
+    if (!rules) continue;
+    var walk = function (list) {
+      for (var j = 0; j < list.length; j++) {
+        var r = list[j];
+        if (r.cssRules && !r.selectorText) { walk(r.cssRules); continue; }
+        if (!r.selectorText) continue;
+        var m = false;
+        try { m = el.matches(r.selectorText); } catch (e2) { m = false; }
+        if (!m) continue;
+        for (var p = 0; p < probe.length; p++) {
+          var v = r.style && r.style.getPropertyValue(probe[p]);
+          if (!v) continue;
+          hits.push({ via: probe[p], sheet: String(href).split('/').pop(), sel: r.selectorText, val: v,
+                      imp: r.style.getPropertyPriority(probe[p]) === 'important' });
+        }
+      }
+    };
+    walk(rules);
+  }
+  if (!hits.length) return { declared: 'no' };
+  /* 优先直接命中长属性的声明；否则退到简写 */
+  var direct = hits.filter(function (h) { return h.via === prop; });
+  var pool = direct.length ? direct : hits;
+  var imp = pool.filter(function (h) { return h.imp; });
+  var last = (imp.length ? imp : pool)[(imp.length ? imp : pool).length - 1];
+  return { declared: 'yes', value: last.val, via: last.via, sheet: last.sheet, sel: last.sel, imp: last.imp, count: hits.length };
+}
+
+function readTarget(t) {
+  var s = splitPseudo(t.sel);
+  if (/:(hover|focus|focus-visible|focus-within|active|visited|target)\b/.test(s.base)) return 'NO-PSEUDO-STATE';
+  if (s.pseudo === '::selection') return 'UNQUERYABLE';
+  var el;
+  try { el = s.base ? document.querySelector(s.base) : document.body; } catch (e) { return 'BAD-SELECTOR'; }
+  if (!el) return 'MISSING-ELEMENT';
+  try {
+    var cs = getComputedStyle(el, s.pseudo);
+    var v = String(cs.getPropertyValue(t.prop)).trim();
+    return v === '' ? 'EMPTY' : v;
+  } catch (e) { return 'BAD-SELECTOR'; }
+}
+
+function measureAll() {
+  var out = [];
+  for (var i = 0; i < NTS_TARGETS.length; i++) {
+    var t = NTS_TARGETS[i];
+    var r = { i: i, sec: t.sec, sel: t.sel, prop: t.prop, v: t.v || null, kind: t.kind || null,
+              aux: !!t.aux, gate: !!t.gate, val: readTarget(t) };
+    /* 原生是否**真的声明**了这条属性（而不是从祖先继承来的计算值）。
+       生成器据此拒绝把「继承来的值」写死成回退值 —— 见 declaredFor 的说明。 */
+    var d = declaredFor(t.sel, t.prop);
+    r.declared = d.declared;
+    if (d.declared === 'yes') { r.declaredValue = d.value; r.declaredSheet = d.sheet; r.declaredCount = d.count; }
+    /* 门控/展开需要用到的四角圆角：即使 targets 没单列也一并量出来 */
+    if (t.prop === 'border-radius') {
+      var s = splitPseudo(t.sel), el = null;
+      try { el = s.base ? document.querySelector(s.base) : document.body; } catch (e) {}
+      if (el) {
+        var cs = getComputedStyle(el, s.pseudo);
+        r.corners = {
+          tl: cs.getPropertyValue('border-top-left-radius').trim(),
+          tr: cs.getPropertyValue('border-top-right-radius').trim(),
+          br: cs.getPropertyValue('border-bottom-right-radius').trim(),
+          bl: cs.getPropertyValue('border-bottom-left-radius').trim()
+        };
+      }
+    }
+    out.push(r);
+  }
+  return out;
+}
+
+/* ---------- 归因：当哨兵值没生效时，指出「哪条规则赢了」 ----------
+ * 之前只能知道「没生效」，于是靠猜（怀疑特异性）。这里直接在失败的上下文里
+ * 按层叠顺序重排候选声明，给出赢家，避免再次把猜测当结论。
+ */
+function specOf(sel) {
+  var best = { a: 0, b: 0, c: 0, s: '' };
+  String(sel).split(',').forEach(function (p) {
+    var s = p.replace(/"[^"]*"|'[^']*'/g, '"x"').trim();
+    var a = (s.match(/#[\w-]+/g) || []).length; s = s.replace(/#[\w-]+/g, ' ');
+    var b = 0, c = 0;
+    (s.match(/::?[a-zA-Z-]+(\([^)]*\))?/g) || []).forEach(function (x) {
+      if (x.indexOf('::') === 0) { c++; return; }
+      if (/^:not\(|^:is\(|^:has\(/.test(x)) {
+        var sub = specOf(x.slice(x.indexOf('(') + 1, x.lastIndexOf(')')));
+        a += sub.a; b += sub.b; c += sub.c;
+      } else if (x.indexOf(':where(') !== 0) b++;
+    });
+    s = s.replace(/::?[a-zA-Z-]+(\([^)]*\))?/g, ' ');
+    b += (s.match(/\.[\w-]+/g) || []).length; s = s.replace(/\.[\w-]+/g, ' ');
+    b += (s.match(/\[[^\]]*\]/g) || []).length; s = s.replace(/\[[^\]]*\]/g, ' ');
+    c += (s.match(/[a-zA-Z][\w-]*/g) || []).length;
+    if (a > best.a || (a === best.a && (b > best.b || (b === best.b && c > best.c)))) best = { a: a, b: b, c: c, s: p.trim() };
+  });
+  return best;
+}
+
+function winnerFor(sel, prop) {
+  var s = splitPseudo(sel), el = null;
+  try { el = s.base ? document.querySelector(s.base) : document.body; } catch (e) { return 'BAD-SELECTOR'; }
+  if (!el) return 'MISSING-ELEMENT';
+  var hits = [], order = 0;
+  function walk(list, atStack) {
+    for (var j = 0; j < list.length; j++) {
+      var r = list[j];
+      if (r.cssRules && !r.selectorText) { walk(r.cssRules, atStack.concat([(r.conditionText || '').slice(0, 50)])); continue; }
+      if (!r.selectorText) continue;
+      var val = r.style && r.style.getPropertyValue(prop);
+      if (!val) continue;
+      var matched = false;
+      try { matched = el.matches(r.selectorText); } catch (e2) { matched = false; }
+      if (!matched) continue;
+      var sp = specOf(r.selectorText);
+      hits.push({ sheet: (r.parentStyleSheet && r.parentStyleSheet.href || '').split('/').pop(),
+                  sel: r.selectorText, val: val, imp: r.style.getPropertyPriority(prop) === 'important',
+                  sp: sp, order: order++, at: atStack.join(' >> ') });
+    }
+  }
+  for (var i = 0; i < document.styleSheets.length; i++) {
+    var rules; try { rules = document.styleSheets[i].cssRules; } catch (e) { continue; }
+    if (rules) walk(rules, []);
+  }
+  hits.sort(function (x, y) {
+    if (x.imp !== y.imp) return x.imp ? -1 : 1;
+    if (x.sp.a !== y.sp.a) return y.sp.a - x.sp.a;
+    if (x.sp.b !== y.sp.b) return y.sp.b - x.sp.b;
+    if (x.sp.c !== y.sp.c) return y.sp.c - x.sp.c;
+    return y.order - x.order;
+  });
+  if (!hits.length) return 'NO-CANDIDATE';
+  return hits.slice(0, 3).map(function (h) {
+    return (h.imp ? '!imp ' : '     ') + 'spec(' + h.sp.a + ',' + h.sp.b + ',' + h.sp.c + ') ' +
+           h.sheet + ' {' + h.sel + '} -> ' + h.val + (h.at ? ' [' + h.at + ']' : '');
+  });
+}
+
+
+// The theme sheet is wrapped in `@layer nts-theme { ... }`, so counting only the
+// top-level rules sees exactly 1 entry and reports a false "premise broken". Walk
+// into grouping rules (@layer/@media/@supports) so the count reflects real rules.
+function countNtsRules(rules) {
+  var n = 0;
+  for (var j = 0; j < rules.length; j++) {
+    var r = rules[j];
+    if (typeof r.selectorText !== 'undefined') {
+      if ((r.cssText || '').indexOf('--nts-') >= 0) n++;
+    } else if (r.cssRules) {
+      n += countNtsRules(r.cssRules);
+    }
+  }
+  return n;
+}
+
+function determineMine() {
+  /* 主题表可能以 <link> 出现（应用页面），也可能被 probe.ps1 内联成 <style>。 */
+  if (document.querySelector('link[href*="neko-theme-studio.css"]')) return true;
+  var st = document.querySelectorAll('style[data-nts-src]');
+  for (var i = 0; i < st.length; i++) {
+    var v = st[i].getAttribute('data-nts-src') || '';
+    if (v.indexOf('neko-theme-studio.css') >= 0) return true;
+  }
+  return false;
+}
+
+function diagnose() {
+  var d = { sheets: document.styleSheets.length, ntsHref: null, ntsRules: 0, uptime: 0, errs: [] };
+  for (var i = 0; i < document.styleSheets.length; i++) {
+    var s = document.styleSheets[i], href = s.href || '';
+    /* 探针页改为 file:// 后样式表是内联的：href 为 null，来源记在 ownerNode 的
+       data-nts-src 上。两种都要认，否则 ntsHref/ntsRules 永远是空的。 */
+    if (!href) {
+      var own = s.ownerNode || (s.ownerNode === 0 ? null : null);
+      var tag = own && own.getAttribute ? own.getAttribute('data-nts-src') : '';
+      if (tag && tag.indexOf('neko-theme-studio.css') >= 0) href = tag;
+    }
+    if (href.indexOf('neko-theme-studio.css') >= 0) {
+      d.ntsHref = href;
+      try {
+        d.ntsRules = countNtsRules(s.cssRules || s.rules || []);
+      } catch (e) { d.errs.push(e.name + ': ' + e.message); }
+    }
+  }
+  try { d.uptime = Math.round(performance.now()); } catch (e) {}
+  return d;
+}
+
+function run() {
+  var q = new URLSearchParams(location.search);
+  var mode = q.get('mode') || 'native';
+  var out = { mode: mode, theme: document.documentElement.getAttribute('data-theme') || 'light',
+              mine: !!determineMine(),
+              diag: null, rows: [], rowsThemed: [] };
+  try {
+    out.diag = diagnose();
+    out.rows = measureAll();
+    if (mode === 'sentinel') {
+      var seen = {}, rs = document.documentElement.style;
+      out.sentinelSet = {};
+      for (var i = 0; i < NTS_TARGETS.length; i++) {
+        var t = NTS_TARGETS[i];
+        if (!t.v || seen[t.v]) continue;
+        seen[t.v] = 1;
+        var s = (t.kind === 'blur') ? 'blur(7px)'
+              : (t.kind === 'shadow') ? '0 0 3px rgb(1, 2, 3)'
+              : (t.kind === 'length') ? '7px'
+              : (t.kind === 'number') ? '0.37'
+              : (t.kind === 'font') ? 'NTSProbeFont, monospace'
+              : 'rgb(1, 2, 3)';
+        rs.setProperty(t.v, s);
+        out.sentinelSet[t.v] = { kind: t.kind || null, set: s };
+      }
+      /* 设置后立刻回读：如果某些变量根本没被写进去，这里会直接暴露，而不是靠猜 */
+      out.sentinelSeen = {};
+      var rootCs = getComputedStyle(document.documentElement);
+      Object.keys(out.sentinelSet).forEach(function (k) {
+        out.sentinelSeen[k] = rootCs.getPropertyValue(k).trim();
+      });
+
+      /* 门控变量：app 侧 JS 对「当前主题里配置过的变量」按模式打
+          data-nts-l-<var>（亮色组）/ data-nts-d-<var>（暗色组）属性。
+          v3 起**每一条**生成的规则都门控在这两种属性之一上，且没有回退值，
+          所以不在这里补打属性，覆盖会是 0。
+          两种属性都打上：亮色页里 data-nts-d-* 不会命中（缺少
+          [data-theme="dark"]），暗色页里 data-nts-l-* 不会命中
+          （被 :not([data-theme="dark"]) 排除），恰好各自只生效一半。 */
+      out.gateAttrs = [];
+      Object.keys(out.sentinelSet).forEach(function (k) {
+        var suffix = k.replace(/^--nts-/, '');
+        ['data-nts-l-', 'data-nts-d-'].forEach(function (p) {
+          var attr = p + suffix;
+          document.documentElement.setAttribute(attr, '');
+          out.gateAttrs.push(attr);
+        });
+      });
+      document.documentElement.setAttribute('data-nts-active', '');
+
+      out.rowsThemed = measureAll();
+      /* 归因：把「哨兵没生效」的行交给 winnerFor，输出真正赢的那条规则 */
+      out.winners = [];
+      for (var k = 0; k < NTS_TARGETS.length; k++) {
+        var tk = NTS_TARGETS[k];
+        if (!tk.v || tk.aux || tk.gate) continue;
+        var before = out.rows[k] && out.rows[k].val;
+        var after = out.rowsThemed[k] && out.rowsThemed[k].val;
+        if (before && /MISSING-ELEMENT|BAD-SELECTOR|EMPTY|UNQUERYABLE|NO-PSEUDO-STATE/.test(String(before))) continue;
+        if (String(before) === String(after)) {
+          out.winners.push({ sel: tk.sel, prop: tk.prop, v: tk.v, native: before, themed: after,
+                             why: winnerFor(tk.sel, tk.prop) });
+        }
+      }
+      rs.cssText = '';
+    }
+    var un = {};
+    for (var j = 0; j < out.rows.length; j++) {
+      var v = out.rows[j].val;
+      if (v === 'MISSING-ELEMENT' || v === 'BAD-SELECTOR' || v === 'EMPTY' || v === 'UNQUERYABLE' || v === 'NO-PSEUDO-STATE') {
+        (un[v] = un[v] || []).push(out.rows[j].sel + ' | ' + out.rows[j].prop);
+      }
+    }
+    out.unavailable = un;
+  } catch (e) {
+    out.error = String((e && e.stack) || e);
+  }
+  document.getElementById('nts-out').textContent = JSON.stringify(out);
+  document.title = 'NTS-DONE';
+}
+
+if (document.readyState === 'complete') run();
+else window.addEventListener('load', run, false);
+</script>
+</body>
+</html>

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>主题工坊 · N.E.K.O</title>
+  <!-- 静态路由给 ui/*.js|css 发 Cache-Control: max-age=3600，不带版本号时升级后最长 1 小时仍跑旧脚本。
+       改动本目录 static 文件时必须同时提升这里的版本号（与 plugin.toml 版本保持一致）。 -->
+  <link rel="stylesheet" href="./style.css?v=0.1.6-71746a8a">
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">N</div>
+        <div class="app-title">
+          <!-- 版本号与 plugin/plugin.toml、plugin/build_info.py 三处同步 -->
+          <h1>主题工坊<span class="version-tag" id="panel-version">插件 v0.1.4</span></h1>
+          <p class="app-sub">编辑 N.E.K.O 的颜色变量，应用后写入 <code>theme.json</code> 并即时生效。</p>
+        </div>
+      </div>
+      <div class="meta-pills" aria-label="调色板信息">
+        <span class="pill" id="meta-name">默认</span>
+        <span class="pill" id="meta-updated">—</span>
+      </div>
+    </header>
+
+    <section class="toolbar" aria-label="工具栏">
+      <div class="mode-switch" role="tablist" aria-label="明暗模式">
+        <button type="button" class="mode-btn is-active" id="mode-light" data-mode="light" role="tab" aria-selected="true" aria-controls="groups">亮色</button>
+        <button type="button" class="mode-btn" id="mode-dark" data-mode="dark" role="tab" aria-selected="false" aria-controls="groups">暗色</button>
+      </div>
+
+      <div class="search-field">
+        <svg class="search-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M7 1a6 6 0 1 1-3.67 10.75l-1.9 1.9a1 1 0 0 1-1.42-1.41l1.9-1.9A6 6 0 0 1 7 1Zm0 1.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9Z"/></svg>
+        <input type="search" id="row-search" placeholder="搜索变量、中文名或说明…" autocomplete="off" spellcheck="false" aria-label="搜索变量">
+        <button type="button" class="search-clear" id="search-clear" aria-label="清空搜索" title="清空搜索" hidden></button>
+      </div>
+
+      <label class="check-field" title="只显示本次会话里改过或清空过的变量（含另一组）">
+        <input type="checkbox" id="only-dirty">
+        <span>只看改动</span>
+      </label>
+
+      <button type="button" class="btn btn-ghost btn-sm" id="btn-toggle-groups">全部收起</button>
+
+      <span class="toolbar-sep" aria-hidden="true"></span>
+
+      <label class="name-field">
+        <span>主题名</span>
+        <input type="text" id="theme-name" maxlength="60" placeholder="默认" autocomplete="off">
+      </label>
+
+      <label class="switch" title="关闭后加载器不会向应用注入任何样式">
+        <input type="checkbox" id="theme-enabled" checked>
+        <span class="switch-track" aria-hidden="true"></span>
+        <span>启用</span>
+      </label>
+
+      <button type="button" class="btn btn-ghost btn-sm" id="btn-revert-mode" title="丢弃本组尚未应用的改动">还原本组</button>
+    </section>
+
+    <div class="layout">
+      <section class="editor-column" aria-label="变量编辑器">
+        <div class="notice" id="notice" role="status" hidden>
+          <span class="notice-text" id="notice-text"></span>
+          <button type="button" class="notice-close" id="notice-close" aria-label="关闭提示"></button>
+        </div>
+        <div id="groups"></div>
+        <p class="no-match" id="no-match" hidden>没有匹配的变量。换个关键词，或关掉「只看改动」。</p>
+        <p class="empty-hint" id="empty-hint">
+          所有行都留空时表示「使用 N.E.K.O 原生外观」，此状态下应用侧不会注入任何样式，视觉零变化。
+        </p>
+      </section>
+
+      <aside class="preview-column" aria-label="预览">
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">实时预览</span>
+            <span class="pill pill-mini" id="preview-mode">亮色</span>
+          </div>
+          <div class="preview" id="preview">
+            <div class="pv-topbar" id="pv-topbar">
+              <span class="pv-dot" aria-hidden="true"></span>
+              <span class="pv-title">N.E.K.O</span>
+            </div>
+            <div class="pv-body" id="pv-body">
+              <div class="pv-line pv-line-user">
+                <div class="pv-bubble" id="pv-user"><div>今晚想聊点什么？</div></div>
+              </div>
+              <div class="pv-line pv-line-ai">
+                <div class="pv-avatar" aria-hidden="true">猫</div>
+                <div class="pv-bubble" id="pv-ai">
+                  <div>我正在听～要不要试试新的配色？</div>
+                  <div class="pv-link" id="pv-link">这是一个链接</div>
+                </div>
+              </div>
+              <div class="pv-chip" id="pv-chip">推荐 chip</div>
+            </div>
+            <div class="pv-input-area" id="pv-input-area">
+              <div class="pv-input" id="pv-input">说点什么…</div>
+              <button type="button" class="pv-send" id="pv-send" tabindex="-1" aria-hidden="true">发送</button>
+            </div>
+          </div>
+          <p class="card-foot">预览用内联样式模拟本面板的编辑状态，实际效果以应用窗口为准。</p>
+        </div>
+
+        <section class="card health-card" aria-label="安装自检">
+          <div class="card-head">
+            <span class="card-title">安装自检</span>
+            <button type="button" class="icon-btn" id="btn-health-refresh" aria-label="重新检查安装状态" title="重新检查">
+              <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 2.5a5.5 5.5 0 0 1 4.9 3H11a.75.75 0 0 0 0 1.5h3.25A.75.75 0 0 0 15 6.25V3a.75.75 0 0 0-1.5 0v1.1A7 7 0 0 0 1.06 7.2a.75.75 0 1 0 1.49.2A5.5 5.5 0 0 1 8 2.5Zm6.45 6.1a.75.75 0 0 1 .59.87A7 7 0 0 1 2.5 11.9V13a.75.75 0 0 1-1.5 0v-3.25a.75.75 0 0 1 .75-.75H5a.75.75 0 0 1 0 1.5H3.6a5.5 5.5 0 0 0 9.98-2.31.75.75 0 0 1 .87-.59Z"/></svg>
+            </button>
+          </div>
+          <p class="health-line" id="health-state">正在检查…</p>
+          <ul class="health-list" id="health-list" role="list"></ul>
+          <div class="health-actions">
+            <button type="button" class="btn btn-sm" id="btn-health-repair" title="重新把主题装进 N.E.K.O 安装目录">一键修复</button>
+            <button type="button" class="btn btn-sm" id="btn-help-open" title="查看常见问题与平台限制">为什么没生效？</button>
+          </div>
+          <p class="card-foot">主题要生效，需要把 <code>neko-theme-studio.js/.css</code> 与两行标签写进 N.E.K.O 自己的安装目录。安装目录不可写时（例如装在 <code>Program Files</code>、或 macOS 的 .app 里），脚本无法自动完成，见「为什么没生效？」。</p>
+        </section>
+
+        <section class="card library-card" aria-label="主题仓库">
+          <div class="card-head">
+            <span class="card-title">主题仓库</span>
+            <button type="button" class="icon-btn" id="btn-lib-refresh" aria-label="刷新仓库列表" title="刷新列表">
+              <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 2.5a5.5 5.5 0 0 1 4.9 3H11a.75.75 0 0 0 0 1.5h3.25A.75.75 0 0 0 15 6.25V3a.75.75 0 0 0-1.5 0v1.1A7 7 0 0 0 1.06 7.2a.75.75 0 1 0 1.49.2A5.5 5.5 0 0 1 8 2.5Zm6.45 6.1a.75.75 0 0 1 .59.87A7 7 0 0 1 2.5 11.9V13a.75.75 0 0 1-1.5 0v-3.25a.75.75 0 0 1 .75-.75H5a.75.75 0 0 1 0 1.5H3.6a5.5 5.5 0 0 0 9.98-2.31.75.75 0 0 1 .87-.59Z"/></svg>
+            </button>
+          </div>
+          <div class="lib-save-row">
+            <textarea id="lib-name" rows="1" maxlength="60" placeholder="保存为…（留空用当前名称）" aria-label="仓库条目名称"></textarea>
+            <button type="button" class="btn btn-sm" id="btn-lib-save" title="把当前调色板存进仓库">保存</button>
+            <button type="button" class="btn btn-sm" id="btn-lib-import" title="导入别人分享的 .zip 主题包">导入包</button>
+            <input type="file" id="lib-file" class="visually-hidden" tabindex="-1" aria-hidden="true" accept=".zip,.theme,.json,application/zip,application/json">
+          </div>
+          <ul class="lib-list" id="lib-list" role="list"></ul>
+          <p class="lib-empty" id="lib-empty">仓库还是空的。调好配色后点「保存」，之后可以随时切回来，也可以「分享」成 zip 发给别人。</p>
+          <p class="card-foot">「分享」导出的 zip 里带 <code>theme.json</code> 和用到的背景图片，别人用「导入包」就能一次拿走全套配色。</p>
+        </section>
+
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">当前调色板</span>
+            <button type="button" class="icon-btn" id="btn-copy-dump" aria-label="复制调色板 JSON" title="复制 JSON">
+              <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M5 1a1 1 0 0 0-1 1v1H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h1a1 1 0 0 0 1-1V4.6a1 1 0 0 0-.3-.7l-2.6-2.6a1 1 0 0 0-.7-.3H5Zm5.5 1.9L12.1 4.5H10.5V2.9ZM4 4h3a1 1 0 0 1 1 1v1h1a1 1 0 0 1 1 1v7H4V4Z"/></svg>
+            </button>
+          </div>
+          <pre class="dump" id="dump">{}</pre>
+          <p class="card-foot" id="dump-foot">服务器上已保存的值 + 本面板未应用的改动。</p>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="app-footer" aria-label="操作">
+      <div class="footer-left">
+        <button type="button" class="btn btn-primary" id="btn-apply" data-busy="false">应用</button>
+        <button type="button" class="btn btn-danger" id="btn-reset" title="恢复内置默认主题，清空所有自定义颜色">重置</button>
+        <span class="footer-sep" aria-hidden="true"></span>
+        <button type="button" class="btn" id="btn-export">导出</button>
+        <button type="button" class="btn" id="btn-import">导入</button>
+        <button type="button" class="btn btn-ghost" id="btn-reload">重新读取</button>
+      </div>
+      <div class="footer-right">
+        <span class="footer-hint"><kbd>Ctrl</kbd><kbd>↵</kbd> 应用</span>
+        <span class="footer-status" id="status" role="status" aria-live="polite">就绪</span>
+      </div>
+    </footer>
+  </div>
+
+  <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby="modal-hint" hidden>
+    <div class="modal-panel" id="modal-panel">
+      <div class="modal-head">
+        <span id="modal-title">导入主题</span>
+        <button type="button" class="modal-close" id="modal-close" aria-label="关闭">×</button>
+      </div>
+      <p class="modal-hint" id="modal-hint">粘贴调色板 JSON 文本。导入为整体替换，非法条目会被后端丢弃。</p>
+      <textarea id="modal-text" spellcheck="false" aria-label="调色板 JSON"></textarea>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="modal-cancel">取消</button>
+        <button type="button" class="btn btn-primary" id="modal-ok">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="./app.js?v=0.1.6-d40aa067"></script>
+</body>
+</html>

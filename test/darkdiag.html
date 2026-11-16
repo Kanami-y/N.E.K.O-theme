@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>NTS dark diagnostics</title>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  if (q.get('theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+})();
+</script>
+<link rel="stylesheet" href="/static/css/index.css">
+<link rel="stylesheet" href="/static/css/agent-plugin-views.css">
+<link rel="stylesheet" href="/static/css/dark-mode.css">
+<link rel="stylesheet" href="/static/react/neko-chat/neko-chat-window.css">
+<link rel="stylesheet" href="/static/css/neko-theme-studio.css">
+</head>
+<body>
+<style>*,*::before,*::after{transition:none!important;animation:none!important}</style>
+<div id="react-chat-window-root">
+  <div class="chat-body">
+    <div class="message user"><div class="message-block">legacy</div></div>
+    <div class="message-bubble message-bubble-user">u</div>
+    <div class="message-bubble message-bubble-assistant">a</div>
+  </div>
+</div>
+<pre id="nts-out" style="display:none"></pre>
+<script>
+/* Which sheet actually owns the dark values, and did our dark twin survive parsing?
+   Answers: (1) is our sheet parsed at all, (2) is the dark-twin rule present in the
+   parsed CSSOM, (3) does its selector match, (4) what wins in the cascade. */
+function ruleInfo(sheet, needle) {
+  var out = [];
+  var rules;
+  try { rules = sheet.cssRules; } catch (e) { return [{ err: String(e) }]; }
+  for (var i = 0; i < rules.length; i++) {
+    var r = rules[i];
+    var sel = r.selectorText || '';
+    if (sel.indexOf(needle) >= 0) {
+      out.push({ i: i, sel: sel, css: (r.style && r.style.cssText) || '' });
+    }
+  }
+  return out;
+}
+
+function run() {
+  var out = { theme: document.documentElement.getAttribute('data-theme'), sheets: [], analysis: {} };
+  var ours = null;
+  for (var i = 0; i < document.styleSheets.length; i++) {
+    var s = document.styleSheets[i];
+    var href = s.href || '(inline)';
+    var n = -1, err = null;
+    try { n = s.cssRules.length; } catch (e) { err = String(e); }
+    out.sheets.push({ i: i, href: href.replace(/^https?:\/\/[^/]+/, ''), rules: n, err: err });
+    if (href.indexOf('neko-theme-studio.css') >= 0) ours = s;
+  }
+  out.analysis.ourSheetFound = !!ours;
+
+  if (ours) {
+    out.analysis.darkTwinMessageUser = ruleInfo(ours, ':root[data-theme="dark"]:root:root body .message.user');
+    out.analysis.lightMessageUser = ruleInfo(ours, ':root:root body .message.user');
+    out.analysis.darkTwinChatBody = ruleInfo(ours, ':root[data-theme="dark"]:root:root body .chat-body');
+  }
+
+  var probe = document.querySelector('.message.user');
+  out.analysis.probeTag = probe ? probe.tagName + '.' + probe.className : 'MISSING';
+  var SEL = ':root[data-theme="dark"]:root:root body .message.user';
+  try { out.analysis.selectorMatches = probe ? probe.matches(SEL) : null; } catch (e) { out.analysis.selectorMatches = 'ERR ' + e.message; }
+  out.analysis.rootIsDark = document.documentElement.matches(':root[data-theme="dark"]');
+
+  var rows = {
+    'message.user|bg': probe ? getComputedStyle(probe).backgroundColor : 'MISSING',
+    'chat-body|bg': (function () { var e = document.querySelector('.chat-body'); return e ? getComputedStyle(e).backgroundColor : 'MISSING'; })(),
+    'bubble-user|bg': (function () { var e = document.querySelector('.message-bubble-user'); return e ? getComputedStyle(e).backgroundColor : 'MISSING'; })()
+  };
+  out.rows = rows;
+  out.cssTexts = {
+    darkMessageUser: (function () {
+      var a = out.analysis.darkTwinMessageUser;
+      return (a && a.length) ? a[0].css : '(rule absent)';
+    })(),
+    lightMessageUser: (function () {
+      var a = out.analysis.lightMessageUser;
+      return (a && a.length) ? a[0].css : '(rule absent)';
+    })()
+  };
+  document.getElementById('nts-out').textContent = JSON.stringify(out);
+  document.title = 'NTS-DONE';
+}
+
+if (document.readyState === 'complete') setTimeout(run, 300);
+else window.addEventListener('load', function () { setTimeout(run, 300); }, false);
+</script>
+</body>
+</html>

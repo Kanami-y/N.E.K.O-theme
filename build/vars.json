@@ -1,0 +1,558 @@
+{
+  "--nts-user-bubble-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgb(68, 183, 254)",
+    "darkNative": "rgb(42, 123, 196)",
+    "sels": [
+      ".message.user | background-color",
+      ".message-bubble-user | background-color"
+    ]
+  },
+  "--nts-user-bubble-text": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgb(255, 255, 255)",
+    "darkNative": "rgb(255, 255, 255)",
+    "sels": [
+      ".message.user | color",
+      ".message-bubble-user | color",
+      ".message-bubble-user .message-block-text | color",
+      ".message-bubble-user .message-block-text-plain | color",
+      ".message-bubble-user .message-block-markdown | color",
+      ".message.user .message-block-markdown | color"
+    ]
+  },
+  "--nts-ai-bubble-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(68, 183, 254, 0.12)",
+    "darkNative": "rgba(42, 123, 196, 0.18)",
+    "sels": [
+      ".message.gemini | background-color",
+      ".message-bubble-assistant | background-color"
+    ]
+  },
+  "--nts-ai-bubble-text": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgb(51, 51, 51)",
+    "darkNative": "rgb(224, 224, 224)",
+    "sels": [
+      ".message.gemini | color",
+      ".message-bubble-assistant | color",
+      ".message-bubble-assistant .message-block-text | color",
+      ".message-bubble-assistant .message-block-markdown | color",
+      ".message.gemini .message-block-text | color",
+      ".message.gemini .message-block-markdown | color"
+    ]
+  },
+  "--nts-bubble-radius": {
+    "kind": "length",
+    "gate": true,
+    "native": "16px 8px 16px 16px",
+    "darkNative": "16px 8px 16px 16px",
+    "sels": [
+      ".message-bubble-user | border-radius",
+      ".message-bubble-assistant | border-radius",
+      ".message-bubble-tool | border-radius"
+    ]
+  },
+  "--nts-tool-bubble-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(0, 0, 0, 0)",
+    "darkNative": "rgba(0, 0, 0, 0)",
+    "sels": [
+      ".message-bubble-tool | background-color",
+      ".message-bubble-system | background-color"
+    ]
+  },
+  "--nts-tool-bubble-text": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgb(43, 58, 80)",
+    "darkNative": "rgb(184, 188, 196)",
+    "sels": [
+      ".message-bubble-tool | color",
+      ".message-bubble-system | color",
+      ".message-bubble-tool .message-block-text | color",
+      ".message-bubble-tool .message-block-markdown | color",
+      ".message-bubble-system .message-block-text | color",
+      ".message-bubble-system .message-block-markdown | color"
+    ]
+  },
+  "--nts-user-bubble-border": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgb(20, 32, 51)",
+    "darkNative": "rgb(216, 230, 255)",
+    "sels": [
+      ".message-bubble-user | outline-color",
+      ".message.user | outline-color"
+    ]
+  },
+  "--nts-ai-bubble-border": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgb(39, 48, 66)",
+    "darkNative": "rgb(232, 234, 237)",
+    "sels": [
+      ".message-bubble-assistant | outline-color",
+      ".message.gemini | outline-color"
+    ]
+  },
+  "--nts-font-size": {
+    "kind": "length",
+    "gate": true,
+    "native": "15.04px",
+    "darkNative": "15.04px",
+    "sels": [
+      ".message-block-markdown | font-size",
+      ".message-block-text | font-size",
+      ".message-block-text-plain | font-size"
+    ]
+  },
+  "--nts-link": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgb(47, 104, 223)",
+    "darkNative": "rgb(111, 168, 255)",
+    "sels": [
+      ".message-block-markdown a | color",
+      "a | color"
+    ]
+  },
+  "--nts-code-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(91, 111, 145, 0.12)",
+    "darkNative": "rgba(100, 120, 160, 0.18)",
+    "sels": [
+      ".message-markdown-inline-code | background-color",
+      ".message-markdown-pre | background-color"
+    ]
+  },
+  "--nts-code-text": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgb(34, 50, 77)",
+    "darkNative": "rgb(192, 204, 224)",
+    "sels": [
+      ".message-markdown-inline-code | color",
+      ".message-markdown-pre | color"
+    ]
+  },
+  "--nts-image-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(0, 0, 0, 0)",
+    "darkNative": "rgba(0, 0, 0, 0)",
+    "sels": [
+      ".message-block-image | background-color"
+    ]
+  },
+  "--nts-status-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(70, 129, 227, 0.12)",
+    "darkNative": "rgba(68, 130, 230, 0.15)",
+    "sels": [
+      ".message-block-status.tone-info | background-color",
+      ".message-block-status.tone-success | background-color",
+      ".message-block-status.tone-warning | background-color",
+      ".message-block-status.tone-error | background-color"
+    ]
+  },
+  "--nts-status-text": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgb(40, 88, 157)",
+    "darkNative": "rgb(111, 168, 255)",
+    "sels": [
+      ".message-block-status.tone-info | color",
+      ".message-block-status.tone-success | color",
+      ".message-block-status.tone-warning | color",
+      ".message-block-status.tone-error | color"
+    ]
+  },
+  "--nts-chat-panel-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(255, 255, 255, 0.91)",
+    "darkNative": "rgba(28, 28, 46, 0.91)",
+    "sels": [
+      ".chat-body | background-color"
+    ]
+  },
+  "--nts-chat-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(0, 0, 0, 0)",
+    "darkNative": "rgba(0, 0, 0, 0)",
+    "sels": [
+      ".chat-window | background-color",
+      "#react-chat-window-root | background-color",
+      ".compact-chat-surface-frame | --compact-chat-surface-bg",
+      ".compact-chat-surface-frame | --compact-chat-capsule-surface-bg"
+    ]
+  },
+  "--nts-topbar-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(255, 255, 255, 0.75)",
+    "darkNative": "rgba(0, 0, 0, 0)",
+    "sels": [
+      ".window-topbar | background-color"
+    ]
+  },
+  "--nts-topbar-text": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgb(34, 34, 34)",
+    "darkNative": "rgb(224, 224, 224)",
+    "sels": [
+      ".window-topbar | color",
+      ".window-title | color"
+    ]
+  },
+  "--nts-shell-radius": {
+    "kind": "length",
+    "gate": true,
+    "native": "14px",
+    "darkNative": "14px",
+    "sels": [
+      "#react-chat-window-shell | border-radius"
+    ]
+  },
+  "--nts-input-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(255, 255, 255, 0.4)",
+    "darkNative": "rgba(40, 40, 40, 0.55)",
+    "sels": [
+      "#text-input-area | background-color",
+      ".composer-input-shell | background-color"
+    ]
+  },
+  "--nts-input-border": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(0, 0, 0, 0.06)",
+    "darkNative": "rgba(255, 255, 255, 0.06)",
+    "sels": [
+      "#text-input-area | border-top-color",
+      ".composer-input-shell | border-top-color"
+    ]
+  },
+  "--nts-input-text": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgb(31, 35, 41)",
+    "darkNative": "rgb(232, 234, 237)",
+    "sels": [
+      ".composer-input | color"
+    ]
+  },
+  "--nts-input-placeholder": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(102, 117, 141, 0.5)",
+    "darkNative": "rgb(154, 160, 172)",
+    "sels": [
+      ".composer-input::placeholder | color"
+    ]
+  },
+  "--nts-button-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(0, 0, 0, 0)",
+    "darkNative": "rgba(0, 0, 0, 0)",
+    "sels": [
+      ".composer-tool-btn | background-color",
+      ".composer-icon-button | background-color",
+      ".composer-attachment-remove | background-color",
+      ".compact-chat-minimize-ball | background-color"
+    ]
+  },
+  "--nts-button-hover-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "NO-PSEUDO-STATE",
+    "darkNative": "NO-PSEUDO-STATE",
+    "sels": [
+      ".composer-tool-btn:hover | background-color"
+    ]
+  },
+  "--nts-button-text": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgb(18, 48, 79)",
+    "darkNative": "rgb(216, 234, 255)",
+    "sels": [
+      ".composer-icon-button | color",
+      ".composer-overflow-btn | color",
+      ".composer-galgame-btn | color",
+      ".composer-tool-btn | color"
+    ]
+  },
+  "--nts-radius": {
+    "kind": "length",
+    "gate": true,
+    "native": "999px",
+    "darkNative": "999px",
+    "sels": [
+      ".composer-icon-button | border-radius",
+      ".composer-panel | border-radius",
+      ".composer-galgame-option | border-radius",
+      ".message-block | border-radius",
+      ".chat-body | border-radius"
+    ]
+  },
+  "--nts-send-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(0, 0, 0, 0)",
+    "darkNative": "rgba(0, 0, 0, 0)",
+    "sels": [
+      ".send-button-circle | background-color",
+      "#sendButton | background-color",
+      "#textSendButton | background-color"
+    ]
+  },
+  "--nts-panel-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(255, 255, 255, 0.91)",
+    "darkNative": "rgba(28, 28, 46, 0.91)",
+    "sels": [
+      ".composer-panel | background-color"
+    ]
+  },
+  "--nts-panel-text": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgb(51, 51, 68)",
+    "darkNative": "rgb(230, 235, 242)",
+    "sels": [
+      ".composer-visit-bar | color"
+    ]
+  },
+  "--nts-chip-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(68, 183, 254, 0.16)",
+    "darkNative": "rgba(68, 183, 254, 0.16)",
+    "sels": [
+      ".composer-visit-bar-badge | background-color",
+      ".composer-galgame-option | background-color",
+      ".system-chip | background-color"
+    ]
+  },
+  "--nts-chip-text": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgb(29, 111, 165)",
+    "darkNative": "rgb(159, 216, 255)",
+    "sels": [
+      ".composer-visit-bar-badge | color",
+      ".composer-visit-bar-action | color",
+      ".composer-galgame-option | color",
+      ".system-chip | color"
+    ]
+  },
+  "--nts-send-text": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgb(255, 255, 255)",
+    "darkNative": "rgb(255, 255, 255)",
+    "sels": [
+      "#sendButton | color",
+      ".compact-input-tool-toggle | color"
+    ]
+  },
+  "--nts-popover-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(0, 0, 0, 0)",
+    "darkNative": "rgba(0, 0, 0, 0)",
+    "sels": [
+      ".composer-icon-popover | background-color",
+      ".composer-overflow-popover | background-color",
+      ".composer-overflow-menu | background-color"
+    ]
+  },
+  "--nts-popover-text": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgb(34, 34, 34)",
+    "darkNative": "rgb(224, 224, 224)",
+    "sels": [
+      ".composer-icon-popover | color",
+      ".composer-overflow-menu | color"
+    ]
+  },
+  "--nts-popover-border": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(127, 144, 170, 0.18)",
+    "darkNative": "rgba(255, 255, 255, 0.08)",
+    "sels": [
+      ".composer-overflow-popover | border-top-color"
+    ]
+  },
+  "--nts-popover-radius": {
+    "kind": "length",
+    "gate": true,
+    "native": "12px",
+    "darkNative": "12px",
+    "sels": [
+      ".composer-overflow-popover | border-radius"
+    ]
+  },
+  "--nts-overlay-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(0, 0, 0, 0)",
+    "darkNative": "rgba(0, 0, 0, 0.65)",
+    "sels": [
+      ".modal-overlay | background-color"
+    ]
+  },
+  "--nts-modal-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(0, 0, 0, 0)",
+    "darkNative": "rgb(45, 45, 45)",
+    "sels": [
+      ".modal-dialog | background-color"
+    ]
+  },
+  "--nts-modal-text": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgb(34, 34, 34)",
+    "darkNative": "rgb(224, 224, 224)",
+    "sels": [
+      ".modal-dialog | color",
+      ".modal-title | color"
+    ]
+  },
+  "--nts-modal-radius": {
+    "kind": "length",
+    "gate": true,
+    "native": "0px",
+    "darkNative": "0px",
+    "sels": [
+      ".modal-dialog | border-radius"
+    ]
+  },
+  "--nts-rec-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgb(255, 255, 255)",
+    "darkNative": "rgb(40, 52, 63)",
+    "sels": [
+      ".proactive-recommendation-card | background-color",
+      ".music-recommendation-icon | background-color",
+      ".compact-export-history-bubble | background-color",
+      ".compact-export-preview-bubble | background-color"
+    ]
+  },
+  "--nts-rec-radius": {
+    "kind": "length",
+    "gate": true,
+    "native": "18px",
+    "darkNative": "18px",
+    "sels": [
+      ".proactive-recommendation-card | border-radius"
+    ]
+  },
+  "--nts-rec-border": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(108, 151, 174, 0.18)",
+    "darkNative": "rgb(65, 84, 95)",
+    "sels": [
+      ".proactive-recommendation-card | border-color"
+    ]
+  },
+  "--nts-rec-text": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgb(52, 75, 93)",
+    "darkNative": "rgb(226, 233, 238)",
+    "sels": [
+      ".proactive-recommendation-bubble | color",
+      ".compact-export-history-bubble | color",
+      ".compact-export-preview-bubble | color"
+    ]
+  },
+  "--nts-highlight": {
+    "kind": "color",
+    "gate": true,
+    "native": "UNQUERYABLE",
+    "darkNative": "UNQUERYABLE",
+    "sels": [
+      "::selection | background-color"
+    ]
+  },
+  "--nts-accent": {
+    "kind": "color",
+    "gate": true,
+    "native": "NO-PSEUDO-STATE",
+    "darkNative": "NO-PSEUDO-STATE",
+    "sels": [
+      ":focus-visible | outline-color",
+      ".compact-chat-surface-frame | border-color",
+      "#agent-content-tasks-tab | color"
+    ]
+  },
+  "--nts-chat-blur": {
+    "kind": "blur",
+    "gate": true,
+    "native": "blur(48px) saturate(1.8)",
+    "darkNative": "blur(48px) saturate(1.8)",
+    "sels": [
+      ".window-topbar | backdrop-filter",
+      ".composer-icon-button | backdrop-filter",
+      ".composer-overflow-popover | backdrop-filter",
+      ".compact-export-history-bubble | backdrop-filter",
+      ".compact-chat-surface-frame | backdrop-filter"
+    ]
+  },
+  "--nts-shadow": {
+    "kind": "shadow",
+    "gate": true,
+    "native": "none",
+    "darkNative": "none",
+    "sels": [
+      ".composer-panel | box-shadow",
+      ".composer-icon-popover | box-shadow",
+      ".composer-overflow-popover | box-shadow",
+      ".modal-dialog | box-shadow",
+      ".proactive-recommendation-card | box-shadow",
+      ".message-bubble-user | box-shadow",
+      ".message-bubble-assistant | box-shadow",
+      ".compact-chat-surface-frame | --compact-chat-surface-shadow"
+    ]
+  },
+  "--nts-card-radius": {
+    "kind": "length",
+    "gate": true,
+    "native": "0px",
+    "darkNative": "0px",
+    "sels": [
+      ".agent-plugin-view | border-radius"
+    ]
+  },
+  "--nts-accent-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": null,
+    "darkNative": null,
+    "sels": [
+      "#agent-content-tasks-tab | background-color"
+    ]
+  }
+}

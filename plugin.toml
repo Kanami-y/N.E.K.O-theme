@@ -1,0 +1,48 @@
+[plugin]
+type = "plugin"
+id = "neko_theme_studio"
+name = "主题工坊"
+description = "在插件面板中编辑 N.E.K.O 聊天气泡、窗口、输入区与面板的颜色变量，导出/导入调色板；面板为静态页面，主题数据经 HTTP 供应用侧加载器读取。"
+short_description = "可视化编辑并保存 N.E.K.O 主题调色板（含暗色与透明度）。"
+keywords = ["theme", "color", "palette", "dark-mode", "主题", "调色板"]
+passive = false
+version = "0.1.10"
+entry = "plugin.plugins.neko_theme_studio:NekoThemeStudioPlugin"
+
+[plugin.author]
+name = "N.E.K.O Team"
+
+[plugin.sdk]
+recommended = ">=0.1.0,<0.2.0"
+supported = ">=0.1.0,<0.3.0"
+
+[plugin.i18n]
+default_locale = "zh-CN"
+locales_dir = "i18n"
+
+[plugin.store]
+enabled = true
+
+[plugin.ui]
+enabled = true
+
+[[plugin.ui.panel]]
+# 面板 id 必须叫 "main"：宿主（插件管理页）对任何带 static/index.html 的老式 UI 插件
+# 都会自动合成一个 id="main" 的兼容 panel surface；如果这里再声明成 "studio"，标签栏就会
+# 出现两个入口（无标题的 "main" + 有标题的 "主题工坊"），其实指向同一页。
+# 声明成 "main" 时宿主会把两者合并成一个 surface（id=main、title=主题工坊、
+# context=dashboard、permissions 用本块的值），标签栏只剩一个「主题工坊」。
+id = "main"
+title = "主题工坊"
+entry = "static/index.html"
+mode = "static"
+open_in = "iframe"
+context = "dashboard"
+permissions = ["state:read", "action:call"]
+
+[plugin_runtime]
+enabled = true
+# 必须自动启动：面板的读取/保存都要调用插件 entry，而插件未运行时 48916 会以
+# NOT_READY 拒绝（{"error":{"code":"NOT_READY", ...}}），面板只能读不能存。
+# 用户路径是「从插件市场安装 → 打开面板 → 调色」，中间不该有手动启动这一步。
+auto_start = true

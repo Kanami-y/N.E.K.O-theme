@@ -23,10 +23,12 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-CSS_PATH = ROOT / "plugin" / "static" / "loader" / "neko-theme-studio.css"
+PLUGIN_DIR = Path(__file__).resolve().parents[1]
+HAS_REPO_TREE = (ROOT / "tools").is_dir()
+CSS_PATH = PLUGIN_DIR / "static" / "loader" / "neko-theme-studio.css"
 GEN_CSS = ROOT / "tools" / "gen-css.js"
 TARGETS = ROOT / "test" / "targets.js"
-LOADER = ROOT / "plugin" / "static" / "loader" / "neko-theme-studio.js"
+LOADER = PLUGIN_DIR / "static" / "loader" / "neko-theme-studio.js"
 MIRRORS = [
     ROOT / "app" / "css" / "neko-theme-studio.css",
     ROOT / "app-patch" / "files" / "css" / "neko-theme-studio.css",
@@ -290,3 +292,8 @@ class LoaderStateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def setUpModule() -> None:
+    if not HAS_REPO_TREE:
+        raise unittest.SkipTest("仓库级测试：市场校验环境只挂载插件目录，没有 test/ / tools/ / app/")

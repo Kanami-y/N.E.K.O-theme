@@ -16,7 +16,9 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]  # plugin/tests/ -> 仓库根
-APP_JS = (ROOT / "plugin" / "static" / "app.js").read_text(encoding="utf-8")
+PLUGIN_DIR = Path(__file__).resolve().parents[1]  # 插件根：本地 plugin/，市场校验 plugins/<id>/
+HAS_REPO_TREE = (ROOT / "tools").is_dir()
+APP_JS = (PLUGIN_DIR / "static" / "app.js").read_text(encoding="utf-8")
 EDITOR_SELFTEST = ROOT / "test" / "editor-selftest.js"
 CI = ROOT / ".github" / "workflows" / "ci.yml"
 TEST_README = ROOT / "test" / "README.md"
@@ -152,3 +154,8 @@ class TestInfrastructureTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def setUpModule() -> None:
+    if not HAS_REPO_TREE:
+        raise unittest.SkipTest("仓库级测试：市场校验环境只挂载插件目录，没有 test/ / tools/ / app/")

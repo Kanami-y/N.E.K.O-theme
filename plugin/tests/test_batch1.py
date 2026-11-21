@@ -16,11 +16,19 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-APP = (ROOT / "plugin" / "static" / "app.js").read_text(encoding="utf-8")
-HTML = (ROOT / "plugin" / "static" / "index.html").read_text(encoding="utf-8")
-CSS = (ROOT / "plugin" / "static" / "style.css").read_text(encoding="utf-8")
-CI = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-README = (ROOT / "test" / "README.md").read_text(encoding="utf-8")
+PLUGIN_DIR = Path(__file__).resolve().parents[1]
+HAS_REPO_TREE = (ROOT / "tools").is_dir()
+
+def repo_text(*parts: str) -> str:
+    """读仓库级文件；市场校验环境没有仓库树时返回空串（对应测试由 setUpModule 跳过）。"""
+    path = ROOT.joinpath(*parts)
+    return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+APP = (PLUGIN_DIR / "static" / "app.js").read_text(encoding="utf-8")
+HTML = (PLUGIN_DIR / "static" / "index.html").read_text(encoding="utf-8")
+CSS = (PLUGIN_DIR / "static" / "style.css").read_text(encoding="utf-8")
+CI = repo_text(".github", "workflows", "ci.yml")
+README = repo_text("test", "README.md")
 
 
 class BlockTests(unittest.TestCase):
@@ -125,3 +133,8 @@ class RegistrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def setUpModule() -> None:
+    if not HAS_REPO_TREE:
+        raise unittest.SkipTest("仓库级测试：市场校验环境只挂载插件目录，没有 test/ / tools/ / app/")

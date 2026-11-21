@@ -14,13 +14,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from offline_backend import ROOT, load_backend  # noqa: E402
+from offline_backend import PLUGIN_DIR, load_backend  # noqa: E402
 
 NS = load_backend()
 KNOWN_VARS = NS["KNOWN_VARS"]
 _validate_palette = NS["_validate_palette"]
 
-PRESET_DIR = ROOT / "plugin" / "static" / "presets"
+PRESET_DIR = PLUGIN_DIR / "static" / "presets"
 REQUIRED_FIELDS = ("schema", "id", "name", "builtin", "saved_at", "note", "vars", "dark_vars")
 PRESET_URL = "http://127.0.0.1:48916/plugin/neko_theme_studio/ui/backgrounds/"
 

@@ -22,13 +22,13 @@ from __future__ import annotations
 import re
 import unittest
 
-from offline_backend import ROOT, load_backend
+from offline_backend import HAS_REPO_TREE, PLUGIN_DIR, ROOT, load_backend
 
 VAR = "--nts-corner-style"
 
-LOADER_JS = ROOT / "plugin" / "static" / "loader" / "neko-theme-studio.js"
-LOADER_CSS = ROOT / "plugin" / "static" / "loader" / "neko-theme-studio.css"
-APP_JS = ROOT / "plugin" / "static" / "app.js"
+LOADER_JS = PLUGIN_DIR / "static" / "loader" / "neko-theme-studio.js"
+LOADER_CSS = PLUGIN_DIR / "static" / "loader" / "neko-theme-studio.css"
+APP_JS = PLUGIN_DIR / "static" / "app.js"
 GEN_CSS = ROOT / "tools" / "gen-css.js"
 TARGETS_JS = ROOT / "test" / "targets.js"
 GUIDE = ROOT / "AI-THEME-GUIDE.md"
@@ -208,3 +208,8 @@ class PanelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def setUpModule() -> None:
+    if not HAS_REPO_TREE:
+        raise unittest.SkipTest("仓库级测试：市场校验环境只挂载插件目录，没有 test/ / tools/ / app/")

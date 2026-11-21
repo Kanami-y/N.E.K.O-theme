@@ -24,16 +24,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from offline_backend import ROOT, load_backend
+from offline_backend import PLUGIN_DIR, load_backend
 
 NS = load_backend()
 SdkError = NS["SdkError"]
 NekoThemeStudioPlugin = NS["NekoThemeStudioPlugin"]
 _validate_palette = NS["_validate_palette"]
 
-BACKEND = (ROOT / "plugin" / "__init__.py").read_text(encoding="utf-8-sig")
-APP_JS = (ROOT / "plugin" / "static" / "app.js").read_text(encoding="utf-8")
-STYLE_CSS = (ROOT / "plugin" / "static" / "style.css").read_text(encoding="utf-8-sig")
+BACKEND = (PLUGIN_DIR / "__init__.py").read_text(encoding="utf-8-sig")
+APP_JS = (PLUGIN_DIR / "static" / "app.js").read_text(encoding="utf-8")
+STYLE_CSS = (PLUGIN_DIR / "static" / "style.css").read_text(encoding="utf-8-sig")
 
 PORTABLE_IMAGE = 'url("images/aaaa1111bbbb2222.jpg")'
 LOCAL_IMAGE = 'url("/plugin/neko_theme_studio/ui/backgrounds/cccc3333dddd4444.jpg")'

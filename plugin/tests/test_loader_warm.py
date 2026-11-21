@@ -10,7 +10,9 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-LOADER = ROOT / "plugin" / "static" / "loader" / "neko-theme-studio.js"
+PLUGIN_DIR = Path(__file__).resolve().parents[1]
+HAS_REPO_TREE = (ROOT / "tools").is_dir()
+LOADER = PLUGIN_DIR / "static" / "loader" / "neko-theme-studio.js"
 MIRRORS = (
     ROOT / "app" / "neko-theme-studio.js",
     ROOT / "app-patch" / "files" / "neko-theme-studio.js",
@@ -37,13 +39,13 @@ class VersionTests(unittest.TestCase):
     def test_plugin_version_matches(self):
         # 不钉死字面版本号：每轮发布都会 bump，钉死只会让「上一个轮次的测试」
         # 在下一轮莫名其妙变红。这里只锁「三处版本源彼此一致」这件事。
-        toml = read(ROOT / "plugin" / "plugin.toml")
+        toml = read(PLUGIN_DIR / "plugin.toml")
         match = re.search(r'^version = "([^"]+)"', toml, re.M)
         self.assertIsNotNone(match, "plugin.toml 里没有 version 行")
         version = match.group(1)
         self.assertRegex(version, r"^\d+\.\d+\.\d+$")
-        self.assertIn('PLUGIN_VERSION = "%s"' % version, read(ROOT / "plugin" / "build_info.py"))
-        self.assertIn('version = "%s"' % version, read(ROOT / "plugin" / "pyproject.toml"))
+        self.assertIn('PLUGIN_VERSION = "%s"' % version, read(PLUGIN_DIR / "build_info.py"))
+        self.assertIn('version = "%s"' % version, read(PLUGIN_DIR / "pyproject.toml"))
 
     def test_mirrors_are_identical(self):
         src = LOADER.read_bytes()
@@ -128,3 +130,8 @@ class RegistrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def setUpModule() -> None:
+    if not HAS_REPO_TREE:
+        raise unittest.SkipTest("仓库级测试：市场校验环境只挂载插件目录，没有 test/ / tools/ / app/")

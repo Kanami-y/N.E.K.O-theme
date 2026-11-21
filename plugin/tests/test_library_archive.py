@@ -27,14 +27,14 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from offline_backend import ROOT, load_backend
+from offline_backend import PLUGIN_DIR, load_backend
 
 NS = load_backend()
 SdkError = NS["SdkError"]
 NekoThemeStudioPlugin = NS["NekoThemeStudioPlugin"]
 LIBRARY_ARCHIVE_FORMAT = NS["LIBRARY_ARCHIVE_FORMAT"]
 
-BACKEND = (ROOT / "plugin" / "__init__.py").read_text(encoding="utf-8-sig")
+BACKEND = (PLUGIN_DIR / "__init__.py").read_text(encoding="utf-8-sig")
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 48
 
@@ -440,8 +440,8 @@ if __name__ == "__main__":
 class PanelWiringTests(unittest.TestCase):
     """面板侧接线：按钮在、走对 entry、坏条目不静默。"""
 
-    APP = (ROOT / "plugin" / "static" / "app.js").read_text(encoding="utf-8")
-    HTML = (ROOT / "plugin" / "static" / "index.html").read_text(encoding="utf-8-sig")
+    APP = (PLUGIN_DIR / "static" / "app.js").read_text(encoding="utf-8")
+    HTML = (PLUGIN_DIR / "static" / "index.html").read_text(encoding="utf-8-sig")
 
     def test_buttons_exist(self):
         self.assertIn('id="btn-lib-backup"', self.HTML)

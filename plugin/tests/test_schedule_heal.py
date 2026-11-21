@@ -19,8 +19,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from offline_backend import ROOT as REPO_ROOT  # noqa: E402
-from offline_backend import load_backend
+from offline_backend import PLUGIN_DIR, load_backend  # noqa: E402
+from offline_backend import ROOT as REPO_ROOT
 from test_schedule import FIXED_NOW, make_plugin, write_preset  # noqa: E402
 
 NS = load_backend()
@@ -28,8 +28,8 @@ NekoThemeStudioPlugin = NS["NekoThemeStudioPlugin"]
 _zone_for_hour = NS["_zone_for_hour"]
 
 ROOT = REPO_ROOT
-APP_JS = (ROOT / "plugin" / "static" / "app.js").read_text(encoding="utf-8")
-INIT_PY = (ROOT / "plugin" / "__init__.py").read_text(encoding="utf-8")
+APP_JS = (PLUGIN_DIR / "static" / "app.js").read_text(encoding="utf-8")
+INIT_PY = (PLUGIN_DIR / "__init__.py").read_text(encoding="utf-8")
 
 
 class FakeLog:

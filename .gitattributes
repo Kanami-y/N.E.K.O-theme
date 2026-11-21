@@ -13,6 +13,11 @@ app/css/neko-theme-studio.css              text eol=lf
 app-patch/files/css/neko-theme-studio.css  text eol=lf
 build/*.css                                text eol=lf
 
+# ?v= 指纹是「文件字节的 sha256 前 8 位」，index.html 里写死一份、
+# materials-selftest 会重算比对 —— 检出成 CRLF 就会对不上，所以同样钉死 LF。
+plugin/static/materials.js   text eol=lf
+plugin/static/materials.css  text eol=lf
+
 # 二进制：显式标记，避免被当成文本参与 diff / 换行转换
 *.zip         binary
 *.neko-plugin binary

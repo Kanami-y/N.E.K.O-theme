@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from offline_backend import ROOT, load_backend  # noqa: E402
+from offline_backend import HAS_REPO_TREE, PLUGIN_DIR, ROOT, load_backend  # noqa: E402
 
 NS = load_backend()
 KNOWN_VARS = NS["KNOWN_VARS"]
@@ -26,9 +26,9 @@ _value_kind = NS["_value_kind"]
 _filter_ok = NS["_filter_chain_ok"]
 _gradient_ok = NS["_gradient_ok"]
 
-APP_JS = (ROOT / "plugin" / "static" / "app.js").read_text(encoding="utf-8")
+APP_JS = (PLUGIN_DIR / "static" / "app.js").read_text(encoding="utf-8")
 LOADER_JS = (
-    ROOT / "plugin" / "static" / "loader" / "neko-theme-studio.js"
+    PLUGIN_DIR / "static" / "loader" / "neko-theme-studio.js"
 ).read_text(encoding="utf-8")
 VARS_JSON_PATH = ROOT / "build" / "vars.json"
 
@@ -191,7 +191,7 @@ class TestThreeWayContract(unittest.TestCase):
             self.assertIn("'" + name + "'", app_js, f"面板 CATALOG 缺 {name}")
 
         # 至少 6 套玻璃预设要给出材质参数（否则用户看不到效果）
-        presets = ROOT / "plugin" / "static" / "presets"
+        presets = PLUGIN_DIR / "static" / "presets"
         glassy = []
         for path in sorted(presets.glob("*.json")):
             data = json.loads(_read(path))
@@ -226,7 +226,7 @@ class TestThreeWayContract(unittest.TestCase):
             self.assertIn("'" + name + "'", APP_JS, f"面板 CATALOG 缺 {name}")
 
         # 玻璃族预设应给出推荐值（否则用户开箱看不到光效）
-        presets = ROOT / "plugin" / "static" / "presets"
+        presets = PLUGIN_DIR / "static" / "presets"
         glassy = []
         for path in sorted(presets.glob("*.json")):
             data = json.loads(_read(path))
@@ -257,14 +257,14 @@ class TestThreeWayContract(unittest.TestCase):
 
 class TestVersionSingleSource(unittest.TestCase):
     def test_plugin_version_matches_generated_files(self):
-        manifest = _read(ROOT / "plugin" / "plugin.toml")
+        manifest = _read(PLUGIN_DIR / "plugin.toml")
         version = RE_VERSION.search(manifest)
         self.assertIsNotNone(version, "plugin.toml 里没有 version")
         expected = version.group(1)
-        build_info = RE_PLUGIN_VERSION.search(_read(ROOT / "plugin" / "build_info.py"))
+        build_info = RE_PLUGIN_VERSION.search(_read(PLUGIN_DIR / "build_info.py"))
         self.assertIsNotNone(build_info)
         self.assertEqual(build_info.group(1), expected, "build_info.py 版本漂移")
-        index = _read(ROOT / "plugin" / "static" / "index.html")
+        index = _read(PLUGIN_DIR / "static" / "index.html")
         tag = re.search(r'version-tag[^>]*>[^v]*v([0-9]+\.[0-9]+\.[0-9]+)<', index)
         self.assertIsNotNone(tag, "index.html 里找不到可见版本号（version-tag）")
         self.assertEqual(tag.group(1), expected, "index.html 可见版本号漂移")
@@ -275,3 +275,8 @@ class TestVersionSingleSource(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+def setUpModule() -> None:
+    if not HAS_REPO_TREE:
+        raise unittest.SkipTest("仓库级测试：市场校验环境只挂载插件目录，没有 test/ / tools/ / app/")

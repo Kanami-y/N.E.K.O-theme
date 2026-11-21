@@ -15,6 +15,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+PLUGIN_DIR = Path(__file__).resolve().parents[1]
+HAS_REPO_TREE = (ROOT / "tools").is_dir()
 INSTALL = ROOT / "install.ps1"
 UNINSTALL = ROOT / "uninstall.ps1"
 PACKAGE_DIST = ROOT / "tools" / "package-dist.ps1"
@@ -105,3 +107,8 @@ class PackageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def setUpModule() -> None:
+    if not HAS_REPO_TREE:
+        raise unittest.SkipTest("仓库级测试：市场校验环境只挂载插件目录，没有 test/ / tools/ / app/")

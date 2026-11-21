@@ -15,11 +15,11 @@ import re
 import unittest
 import zipfile
 
-from offline_backend import ROOT
+from offline_backend import HAS_REPO_TREE, PLUGIN_DIR, ROOT
 
 SCRIPT = ROOT / "tools" / "package-plugin.ps1"
 DIST_PACKAGE = ROOT / "dist" / "neko_theme_studio.neko-plugin"
-PLUGIN_TOML = ROOT / "plugin" / "plugin.toml"
+PLUGIN_TOML = PLUGIN_DIR / "plugin.toml"
 PLUGIN_ID = "neko_theme_studio"
 
 
@@ -203,3 +203,8 @@ class BuiltPackageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def setUpModule() -> None:
+    if not HAS_REPO_TREE:
+        raise unittest.SkipTest("仓库级测试：市场校验环境只挂载插件目录，没有 test/ / tools/ / app/")

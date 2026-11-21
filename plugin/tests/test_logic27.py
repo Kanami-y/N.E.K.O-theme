@@ -21,12 +21,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from offline_backend import ROOT, load_backend  # noqa: E402
+from offline_backend import PLUGIN_DIR, load_backend  # noqa: E402
 
 NS = load_backend()
-PY_FILE = ROOT / "plugin" / "__init__.py"
-LOADER_JS = ROOT / "plugin" / "static" / "loader" / "neko-theme-studio.js"
-APP_JS = ROOT / "plugin" / "static" / "app.js"
+PY_FILE = PLUGIN_DIR / "__init__.py"
+LOADER_JS = PLUGIN_DIR / "static" / "loader" / "neko-theme-studio.js"
+APP_JS = PLUGIN_DIR / "static" / "app.js"
 
 
 def read(path: Path) -> str:

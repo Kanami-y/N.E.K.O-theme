@@ -22,7 +22,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from offline_backend import ROOT, load_backend
+from offline_backend import PLUGIN_DIR, load_backend
 
 NS = load_backend()
 SdkError = NS["SdkError"]
@@ -32,10 +32,10 @@ SCHEDULE_ZONES = NS["SCHEDULE_ZONES"]
 SCHEDULE_DAY_KINDS = NS["SCHEDULE_DAY_KINDS"]
 SCHEDULE_WEEKEND_WEEKDAYS = NS["SCHEDULE_WEEKEND_WEEKDAYS"]
 
-BACKEND = (ROOT / "plugin" / "__init__.py").read_text(encoding="utf-8")
-APP_JS = (ROOT / "plugin" / "static" / "app.js").read_text(encoding="utf-8")
-INDEX_HTML = (ROOT / "plugin" / "static" / "index.html").read_text(encoding="utf-8")
-STYLE_CSS = (ROOT / "plugin" / "static" / "style.css").read_text(encoding="utf-8")
+BACKEND = (PLUGIN_DIR / "__init__.py").read_text(encoding="utf-8")
+APP_JS = (PLUGIN_DIR / "static" / "app.js").read_text(encoding="utf-8")
+INDEX_HTML = (PLUGIN_DIR / "static" / "index.html").read_text(encoding="utf-8")
+STYLE_CSS = (PLUGIN_DIR / "static" / "style.css").read_text(encoding="utf-8")
 
 
 def make_plugin(tmp: Path):

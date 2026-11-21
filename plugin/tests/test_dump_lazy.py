@@ -11,13 +11,15 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-APP_JS = ROOT / "plugin" / "static" / "app.js"
-INDEX = ROOT / "plugin" / "static" / "index.html"
+PLUGIN_DIR = Path(__file__).resolve().parents[1]
+HAS_REPO_TREE = (ROOT / "tools").is_dir()
+APP_JS = PLUGIN_DIR / "static" / "app.js"
+INDEX = PLUGIN_DIR / "static" / "index.html"
 SELFTEST = ROOT / "test" / "dump-selftest.js"
 CI = ROOT / ".github" / "workflows" / "ci.yml"
 README = ROOT / "test" / "README.md"
-PLUGIN_TOML = ROOT / "plugin" / "plugin.toml"
-BUILD_INFO = ROOT / "plugin" / "build_info.py"
+PLUGIN_TOML = PLUGIN_DIR / "plugin.toml"
+BUILD_INFO = PLUGIN_DIR / "build_info.py"
 
 
 def read(path: Path) -> str:
@@ -36,7 +38,7 @@ class VersionTests(unittest.TestCase):
     def test_loader_version_is_single_sourced(self):
         # 不钉死字面版本号（每轮 bump 会顶掉它）。这里锁「loader 只有一份版本源，
         # 三份副本必须一致」——这才是真正会静默出错的地方。
-        loader = ROOT / "plugin" / "static" / "loader" / "neko-theme-studio.js"
+        loader = PLUGIN_DIR / "static" / "loader" / "neko-theme-studio.js"
         match = re.search(r"var SCRIPT_VERSION = '(\d+\.\d+\.\d+)';", read(loader))
         self.assertIsNotNone(match, "loader 里找不到 SCRIPT_VERSION")
         version = match.group(1)
@@ -190,3 +192,8 @@ class TestInfrastructureTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def setUpModule() -> None:
+    if not HAS_REPO_TREE:
+        raise unittest.SkipTest("仓库级测试：市场校验环境只挂载插件目录，没有 test/ / tools/ / app/")

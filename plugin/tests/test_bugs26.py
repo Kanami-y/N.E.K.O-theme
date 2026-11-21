@@ -37,17 +37,17 @@ from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
-from offline_backend import ROOT, load_backend
+from offline_backend import HAS_REPO_TREE, PLUGIN_DIR, load_backend, repo_text
 
 NS = load_backend()
 SdkError = NS["SdkError"]
 NekoThemeStudioPlugin = NS["NekoThemeStudioPlugin"]
 _zone_for_hour = NS["_zone_for_hour"]
 
-BACKEND = (ROOT / "plugin" / "__init__.py").read_text(encoding="utf-8")
-APP_JS = (ROOT / "plugin" / "static" / "app.js").read_text(encoding="utf-8")
-INSTALL_PS1 = (ROOT / "install.ps1").read_text(encoding="utf-8-sig")
-LOADER_JS = (ROOT / "plugin" / "static" / "loader" / "neko-theme-studio.js").read_text(encoding="utf-8")
+BACKEND = (PLUGIN_DIR / "__init__.py").read_text(encoding="utf-8")
+APP_JS = (PLUGIN_DIR / "static" / "app.js").read_text(encoding="utf-8")
+INSTALL_PS1 = repo_text("install.ps1")
+LOADER_JS = (PLUGIN_DIR / "static" / "loader" / "neko-theme-studio.js").read_text(encoding="utf-8")
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 48
 
@@ -80,7 +80,7 @@ def write_preset(tmp: Path, theme_id: str, name: str) -> None:
 
 
 def load_app_patch():
-    path = ROOT / "plugin" / "_app_patch.py"
+    path = PLUGIN_DIR / "_app_patch.py"
     spec = importlib.util.spec_from_file_location("nts_app_patch_r26", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -269,6 +269,7 @@ class AutostartOnceTests(unittest.TestCase):
         self.assertNotIn("neko-plugin-installations", marker.as_posix())
 
 
+@unittest.skipUnless(HAS_REPO_TREE, "仓库级测试：市场校验环境只挂载插件目录，没有 install.ps1 / test/ / .github/")
 class InstallScriptTests(unittest.TestCase):
     """install.ps1 的用户数据备份必须是真复制（P0：以前一个文件都没拷）。"""
 

@@ -21,14 +21,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from offline_backend import ROOT, load_backend
+from offline_backend import PLUGIN_DIR, load_backend
 from test_library_archive import add_theme, make_plugin, must_err, unwrap
 
 NS = load_backend()
 SdkError = NS["SdkError"]
 ARCHIVE_MAX_BYTES = NS["ARCHIVE_MAX_BYTES"]
 
-BACKEND = (ROOT / "plugin" / "__init__.py").read_text(encoding="utf-8-sig")
+BACKEND = (PLUGIN_DIR / "__init__.py").read_text(encoding="utf-8-sig")
 
 BASE_VARS = {
     "--nts-accent": "#7fb8ff",

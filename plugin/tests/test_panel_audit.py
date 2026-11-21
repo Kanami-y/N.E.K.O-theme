@@ -9,9 +9,9 @@ from __future__ import annotations
 import re
 import unittest
 
-from offline_backend import ROOT, load_backend
+from offline_backend import PLUGIN_DIR, load_backend
 
-PANEL = ROOT / "plugin" / "static"
+PANEL = PLUGIN_DIR / "static"
 APP_JS = (PANEL / "app.js").read_text(encoding="utf-8")
 INDEX_HTML = (PANEL / "index.html").read_text(encoding="utf-8")
 STYLE_CSS = (PANEL / "style.css").read_text(encoding="utf-8")

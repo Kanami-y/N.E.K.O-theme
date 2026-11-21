@@ -11,8 +11,10 @@ import pathlib
 import unittest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-APP_JS = REPO / "plugin" / "static" / "app.js"
-INDEX_HTML = REPO / "plugin" / "static" / "index.html"
+PLUGIN_DIR = pathlib.Path(__file__).resolve().parents[1]  # 市场校验时插件根不叫 plugin
+HAS_REPO_TREE = (REPO / "tools").is_dir()
+APP_JS = PLUGIN_DIR / "static" / "app.js"
+INDEX_HTML = PLUGIN_DIR / "static" / "index.html"
 SELFTEST = REPO / "test" / "freshness-selftest.js"
 CI = REPO / ".github" / "workflows" / "ci.yml"
 README = REPO / "test" / "README.md"
@@ -79,3 +81,8 @@ class PanelFreshnessTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def setUpModule() -> None:
+    if not HAS_REPO_TREE:
+        raise unittest.SkipTest("仓库级测试：市场校验环境只挂载插件目录")

@@ -23,7 +23,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 
-from offline_backend import ROOT, load_backend
+from offline_backend import HAS_REPO_TREE, PLUGIN_DIR, load_backend, repo_text
 
 NS = load_backend()
 SdkError = NS["SdkError"]
@@ -34,11 +34,11 @@ SCHEDULE_ZONES = NS["SCHEDULE_ZONES"]
 SCHEDULE_ZONE_HOURS = NS["SCHEDULE_ZONE_HOURS"]
 SCHEDULE_TICK_SECONDS = NS["SCHEDULE_TICK_SECONDS"]
 
-BACKEND = (ROOT / "plugin" / "__init__.py").read_text(encoding="utf-8")
-APP_JS = (ROOT / "plugin" / "static" / "app.js").read_text(encoding="utf-8")
-INDEX_HTML = (ROOT / "plugin" / "static" / "index.html").read_text(encoding="utf-8")
-STYLE_CSS = (ROOT / "plugin" / "static" / "style.css").read_text(encoding="utf-8")
-INSTALL_PS1 = (ROOT / "install.ps1").read_text(encoding="utf-8-sig")
+BACKEND = (PLUGIN_DIR / "__init__.py").read_text(encoding="utf-8")
+APP_JS = (PLUGIN_DIR / "static" / "app.js").read_text(encoding="utf-8")
+INDEX_HTML = (PLUGIN_DIR / "static" / "index.html").read_text(encoding="utf-8")
+STYLE_CSS = (PLUGIN_DIR / "static" / "style.css").read_text(encoding="utf-8")
+INSTALL_PS1 = repo_text("install.ps1")
 
 
 # 固定时钟：2026-01-05 是周一 10:00（weekday / morning 时段）。
@@ -492,6 +492,7 @@ class WiringTests(unittest.TestCase):
         # 主题名来自仓库 JSON，绝不能拼进 innerHTML。
         self.assertNotIn("innerHTML = '<", block)
 
+    @unittest.skipUnless(HAS_REPO_TREE, "仓库级测试：市场校验环境只挂载插件目录，没有 install.ps1 / test/ / .github/")
     def test_install_backs_up_schedule(self):
         # 重装会删旧插件目录；schedule.json 与 theme.json 同级，必须一起备份/恢复。
         backup_block = INSTALL_PS1.split("function Backup-NtsUserData", 1)[1].split("function Restore-NtsUserData", 1)[0]

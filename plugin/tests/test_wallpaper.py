@@ -8,8 +8,10 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-APP_JS = (ROOT / "plugin/static/app.js").read_text(encoding="utf-8")
-INDEX_HTML = (ROOT / "plugin/static/index.html").read_text(encoding="utf-8")
+PLUGIN_DIR = Path(__file__).resolve().parents[1]  # 市场校验时插件根不叫 plugin
+HAS_REPO_TREE = (ROOT / "tools").is_dir()
+APP_JS = (PLUGIN_DIR / "static" / "app.js").read_text(encoding="utf-8")
+INDEX_HTML = (PLUGIN_DIR / "static" / "index.html").read_text(encoding="utf-8")
 
 
 def block_source(begin: str, end: str) -> str:
@@ -155,6 +157,7 @@ class WiringTests(unittest.TestCase):
         ):
             assert hook in APP_JS, hook
 
+    @unittest.skipUnless(HAS_REPO_TREE, "仓库级测试：市场校验环境只挂载插件目录，没有 install.ps1 / test/ / .github/")
     def test_ci_and_readme_registered(self) -> None:
         ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         assert "test/wallpaper-selftest.js" in ci

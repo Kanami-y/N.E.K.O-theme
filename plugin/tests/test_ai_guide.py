@@ -14,7 +14,7 @@ import json
 import re
 import unittest
 
-from offline_backend import ROOT, load_backend
+from offline_backend import HAS_REPO_TREE, ROOT, load_backend
 
 GUIDE = ROOT / "AI-THEME-GUIDE.md"
 
@@ -77,3 +77,8 @@ class ValidatorToolTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def setUpModule() -> None:
+    if not HAS_REPO_TREE:
+        raise unittest.SkipTest("仓库级测试：市场校验环境只挂载插件目录，没有 test/ / tools/ / app/")

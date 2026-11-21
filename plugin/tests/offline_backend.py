@@ -13,7 +13,17 @@ from pathlib import Path
 
 PLUGIN_DIR = Path(__file__).resolve().parents[1]
 ROOT = PLUGIN_DIR.parent
+# 市场校验会把整个 plugin/ 目录挂到 <neko>/plugin/plugins/<id>/ 下，
+# 那时仓库级的 test/、tools/、app/ 都不存在 —— 这类测试只能跳过。
+HAS_REPO_TREE = (ROOT / "tools").is_dir()
 SOURCE_PATH = PLUGIN_DIR / "__init__.py"
+
+
+def repo_text(*parts: str) -> str:
+    """读仓库级文件；市场校验环境没有仓库树时返回空串（对应测试由 setUpModule 跳过）。"""
+    path = ROOT.joinpath(*parts)
+    return path.read_text(encoding="utf-8") if path.is_file() else ""
+
 
 _IMPORT_HEAD = "from plugin.sdk.plugin import ("
 

@@ -21,13 +21,13 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from offline_backend import ROOT as REPO_ROOT  # noqa: E402
-from offline_backend import load_backend
+from offline_backend import HAS_REPO_TREE, PLUGIN_DIR, load_backend  # noqa: E402
+from offline_backend import ROOT as REPO_ROOT
 
 NS = load_backend()
 Plugin = NS["NekoThemeStudioPlugin"]
 
-LOADER_DIR = REPO_ROOT / "plugin" / "static" / "loader"
+LOADER_DIR = PLUGIN_DIR / "static" / "loader"
 CSS_BYTES = (LOADER_DIR / "neko-theme-studio.css").read_bytes()
 JS_TEXT = (LOADER_DIR / "neko-theme-studio.js").read_text(encoding="utf-8")
 CSS8 = hashlib.sha256(CSS_BYTES).hexdigest()[:8]
@@ -175,3 +175,8 @@ class LoaderZeroDownloadTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def setUpModule() -> None:
+    if not HAS_REPO_TREE:
+        raise unittest.SkipTest("仓库级测试：市场校验环境只挂载插件目录，没有 test/ / tools/ / app/")

@@ -11,9 +11,10 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-APP = ROOT / "plugin" / "static" / "app.js"
-HTML = ROOT / "plugin" / "static" / "index.html"
-CSS = ROOT / "plugin" / "static" / "style.css"
+PLUGIN_DIR = Path(__file__).resolve().parents[1]
+APP = PLUGIN_DIR / "static" / "app.js"
+HTML = PLUGIN_DIR / "static" / "index.html"
+CSS = PLUGIN_DIR / "static" / "style.css"
 
 
 class DropImportTests(unittest.TestCase):

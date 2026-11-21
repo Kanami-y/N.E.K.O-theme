@@ -29,13 +29,14 @@ if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
 _ob = importlib.import_module("offline_backend")
+PLUGIN_DIR = _ob.PLUGIN_DIR
 ROOT, load_backend = _ob.ROOT, _ob.load_backend
 
 NS = load_backend()
 Plugin = NS["NekoThemeStudioPlugin"]
 
-APP_JS = (ROOT / "plugin" / "static" / "app.js").read_text(encoding="utf-8")
-INDEX_HTML = (ROOT / "plugin" / "static" / "index.html").read_text(encoding="utf-8")
+APP_JS = (PLUGIN_DIR / "static" / "app.js").read_text(encoding="utf-8")
+INDEX_HTML = (PLUGIN_DIR / "static" / "index.html").read_text(encoding="utf-8")
 
 
 def make_plugin(tmp):

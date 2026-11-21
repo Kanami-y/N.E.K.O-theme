@@ -22,10 +22,10 @@ from __future__ import annotations
 import re
 import unittest
 
-from offline_backend import ROOT
+from offline_backend import HAS_REPO_TREE, PLUGIN_DIR, ROOT
 
-APP_JS = (ROOT / "plugin" / "static" / "app.js").read_text(encoding="utf-8")
-INDEX_HTML = (ROOT / "plugin" / "static" / "index.html").read_text(encoding="utf-8")
+APP_JS = (PLUGIN_DIR / "static" / "app.js").read_text(encoding="utf-8")
+INDEX_HTML = (PLUGIN_DIR / "static" / "index.html").read_text(encoding="utf-8")
 
 
 def _block(start_marker: str, end_marker: str) -> str:
@@ -191,3 +191,8 @@ class RegressionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def setUpModule() -> None:
+    if not HAS_REPO_TREE:
+        raise unittest.SkipTest("仓库级测试：市场校验环境只挂载插件目录，没有 test/ / tools/ / app/")

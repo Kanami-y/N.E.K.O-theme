@@ -11,8 +11,9 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-APP = (ROOT / "plugin" / "static" / "app.js")
-CSS = (ROOT / "plugin" / "static" / "style.css")
+PLUGIN_DIR = Path(__file__).resolve().parents[1]
+APP = (PLUGIN_DIR / "static" / "app.js")
+CSS = (PLUGIN_DIR / "static" / "style.css")
 
 
 class PanelP1Tests(unittest.TestCase):

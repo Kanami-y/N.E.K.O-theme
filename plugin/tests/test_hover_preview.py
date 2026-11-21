@@ -12,7 +12,9 @@ import re
 import unittest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-APP_JS = REPO / "plugin" / "static" / "app.js"
+PLUGIN_DIR = pathlib.Path(__file__).resolve().parents[1]  # 市场校验时插件根不叫 plugin
+HAS_REPO_TREE = (REPO / "tools").is_dir()
+APP_JS = PLUGIN_DIR / "static" / "app.js"
 SELFTEST = REPO / "test" / "hover-selftest.js"
 CI = REPO / ".github" / "workflows" / "ci.yml"
 README = REPO / "test" / "README.md"
@@ -119,3 +121,8 @@ class HoverPreviewTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def setUpModule() -> None:
+    if not HAS_REPO_TREE:
+        raise unittest.SkipTest("仓库级测试：市场校验环境只挂载插件目录")

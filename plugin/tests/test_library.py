@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from offline_backend import ROOT, load_backend
+from offline_backend import PLUGIN_DIR, load_backend
 
 NS = load_backend()
 SdkError = NS["SdkError"]
@@ -24,9 +24,9 @@ _parse_theme_json = NS["_parse_theme_json"]
 _theme_note = NS["_theme_note"]
 _theme_tags = NS["_theme_tags"]
 
-BACKEND = (ROOT / "plugin" / "__init__.py").read_text(encoding="utf-8")
-APP_JS = (ROOT / "plugin" / "static" / "app.js").read_text(encoding="utf-8")
-INDEX_HTML = (ROOT / "plugin" / "static" / "index.html").read_text(encoding="utf-8")
+BACKEND = (PLUGIN_DIR / "__init__.py").read_text(encoding="utf-8")
+APP_JS = (PLUGIN_DIR / "static" / "app.js").read_text(encoding="utf-8")
+INDEX_HTML = (PLUGIN_DIR / "static" / "index.html").read_text(encoding="utf-8")
 
 
 def _body(obj) -> bytes:
@@ -179,7 +179,7 @@ class PanelWiringTests(unittest.TestCase):
             APP_JS, r"var libBtns = \[favBtn, applyBtn, exportBtn(?:, \w+)*\];"
         )
         self.assertIn("「☆ 收藏」按钮", APP_JS)
-        style = (ROOT / "plugin" / "static" / "style.css").read_text(encoding="utf-8")
+        style = (PLUGIN_DIR / "static" / "style.css").read_text(encoding="utf-8")
         fav_block = style.split(".lib-fav {", 1)[1].split("}", 1)[0]
         self.assertNotIn("position: absolute", fav_block)
 

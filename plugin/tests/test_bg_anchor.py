@@ -35,9 +35,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from offline_backend import ROOT  # noqa: E402
+from offline_backend import HAS_REPO_TREE, PLUGIN_DIR, ROOT  # noqa: E402
 
-LOADER_CSS = ROOT / "plugin" / "static" / "loader" / "neko-theme-studio.css"
+LOADER_CSS = PLUGIN_DIR / "static" / "loader" / "neko-theme-studio.css"
 GEN_CSS_JS = ROOT / "tools" / "gen-css.js"
 MIRRORS = (
     ROOT / "app" / "css" / "neko-theme-studio.css",
@@ -136,3 +136,8 @@ class BackgroundAnchorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def setUpModule() -> None:
+    if not HAS_REPO_TREE:
+        raise unittest.SkipTest("仓库级测试：市场校验环境只挂载插件目录，没有 test/ / tools/ / app/")

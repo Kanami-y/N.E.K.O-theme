@@ -2,9 +2,39 @@
 
 > 适用症状：在插件面板里改了颜色、点了「应用」、提示成功，但应用窗口里的气泡/按钮/背景一点没变。
 > 本文只做一件事：把「面板 → theme.json → loader → CSS 门控 → 元素计算色」这条链路拆成可判定的小段，指出断在哪。
+>
+> 动手前先记住两条：改完主题需要**完全退出 N.E.K.O（含托盘图标）后重新打开**，只按 F5 刷新不够；
+> 装完想整体确认，先跑 `powershell -NoProfile -File theme-studio\install.ps1 -Verify`（只读，不改任何文件）。
+
+## 先看：面板报 `[Errno 13] Permission denied` / 「写入主题失败」
+
+**症状**：点「应用」后报错，路径类似
+`...\.neko-plugin-installations\plugins\neko_theme_studio\static\.theme.json.<pid>.<tid>.tmp`；
+插件日志里也可能有「原始模板备份失败，已放弃打补丁」。
+
+**原因**：N.E.K.O 的插件子进程以 **Low 完整性级别（IL）** 运行，而 `install.ps1` 常需管理员提权，
+提权进程写出的插件目录/文件是 Medium/High —— Low 进程往里新建文件就会被系统拒绝。
+这**不是**磁盘满、也不是插件 bug，重装旧脚本也修不好，必须把目录级别降下来。
+
+**修复（任选其一，推荐第一条）**：
+
+```powershell
+# 1) 以管理员身份重跑安装脚本（0.1.11 起自带 F8 步骤，会把两个目录降到 Low）
+powershell -NoProfile -File .\install.ps1   # 被执行策略拦截时先试 RemoteSigned，别直接关策略
+```
+
+```powershell
+# 2) 只修权限，不动文件
+$p = "$env:LOCALAPPDATA\N.E.K.O\.neko-plugin-installations\plugins\neko_theme_studio"
+$b = "$env:LOCALAPPDATA\N.E.K.O\theme-studio-backup"
+icacls $p /setintegritylevel '(OI)(CI)L' /T /C
+icacls $b /setintegritylevel '(OI)(CI)L' /T /C
+```
+
+修完完全退出 N.E.K.O（含托盘图标）再打开。校验：`install.ps1 -Verify` 应显示
+「插件目录完整性级别 当前 Low」「备份目录完整性级别 当前 Low」两项 PASS。
 
 ## 第 0 步：确认两个服务在跑（10 秒）
-
 1. 应用本身在跑：浏览器能打开 `http://127.0.0.1:48911/chat`。
 2. 插件服务在跑：**用浏览器直接打开**
    `http://127.0.0.1:48916/plugin/neko_theme_studio/ui/theme.json`
@@ -25,29 +55,27 @@
 
 > 若 Console 拒绝粘贴，输入 `allow pasting` 回车后再粘（Chrome 的一次性保护）。
 
-### 方案 B（有 node 的机器）
+### 方案 B（旧流程，已废弃）
 
-```
-powershell -ExecutionPolicy Bypass -File .\theme-studio\test\diagnose-live.ps1
-```
-
-它用无头 Chrome/Edge 打开同一张页面跑同一个表达式，自动打印判读结果；
-可加 `-Url` / `-Port` / `-BrowserPath` / `-OutFile`。
+旧版的 `test\diagnose-live.ps1` 落后于当前 loader 的诊断字段，且示例里的
+`-ExecutionPolicy Bypass` 不应再使用（脚本未签名，被执行策略拦截时请用管理员 PowerShell）。
+**现在的做法**：用 `install.ps1 -Verify` 做只读全量校验，再用第 0 步 / 第 1 步的方法定位渲染问题。
 
 ## 第 1.5 步：先看 Console 里有没有这两行（10 秒，不用跑脚本）
 
-- **启动横幅**：`[theme-studio] loader v1.4.0 已加载，端点 http://127.0.0.1:48916/…`
+- **启动横幅**：`[theme-studio] loader v1.5.12 已加载，端点 http://127.0.0.1:48916/…`
   没有这行 = 脚本没加载/执行失败（模板补丁丢了，或路径不对）→ 重跑 `install.ps1` 并重启窗口。
+  实际版本以横幅 / `NekoThemeStudio.scriptVersion` / `install.ps1 -Verify` 输出为准。
 - **单侧模式告警**：`[theme-studio] 当前是暗色模式，但调色板里暗色这一组是空的（亮色组有 N 项）…`
   出现这行 = 颜色确实写进去了，只是**当前模式没有对应值**。到面板切到同名页签补一遍即可 ——
   这也是「面板显示已应用、本体一点没变」最常见的成因。
-- **陈旧样式表自愈（1.4.0 起）**：`[theme-studio] 检测到页面里的 neko-theme-studio.css 与服务器上的不一致…已强制重新加载样式表。`
+- **陈旧样式表自愈（loader 1.1.0 起）**：`[theme-studio] 检测到页面里的 neko-theme-studio.css 与服务器上的不一致…已强制重新加载样式表。`
   出现这行 = 这个窗口是在插件更新**之前**打开的（页面里的 `<link>` 还是旧的，浏览器按
   `immutable` 缓存一年不重取）。loader 已自动把 `<link>` 换成带 `nts-refresh=<时间戳>` 的新 URL，
   相当于原地刷新样式表；不需要你清缓存。旧窗口里的旧 bug 也只在这一刻才被替换掉。
 
 > loader v1.1.0 起才会打这两行；旧 loader 静默（所以先看 `NekoThemeStudio.scriptVersion`，
-> 本版应为 `1.4.0`）。
+> 本版应为 `1.5.12`，实际以 `NekoThemeStudio.scriptVersion` 与 `install.ps1 -Verify` 输出为准）。
 
 ## 第 1.6 步：先确认「你盯着的元素」在当前布局里真的可见（30 秒）
 
@@ -64,7 +92,7 @@ powershell -ExecutionPolicy Bypass -File .\theme-studio\test\diagnose-live.ps1
   `resources/bin/static/common-ui-hud.js` 以**内联 style + `var(--neko-popup-*)`** 写，
   所以本版把这些变量**桥接**过去（见 `THEME_CONTRACT.md` §3.3「紧凑胶囊 / 悬浮 HUD」）。
 
-本版（loader 1.4.0 + CSS 生成器）已经给上面这些真实可见面加了门控规则：配了
+当前 loader 已经给上面这些真实可见面加了门控规则：配了
 `--nts-chat-bg` → 胶囊底色变；配了 `--nts-panel-bg` / `--nts-panel-text` → 猫爪 HUD 变；
 配了 `--nts-accent` → 胶囊描边变。若这些仍不变，按第 2 步对号入座。
 
@@ -75,7 +103,7 @@ powershell -ExecutionPolicy Bypass -File .\theme-studio\test\diagnose-live.ps1
 ## 第 0.5 步：插件没在跑？（本版已自动化，无需手工）
 
 冷启动后如果插件停在 `stopped`，表现是面板能打开、但每次「应用」都失败，或应用窗口颜色一直是原生色。
-本版（loader 1.4.0 + 面板 0.1.4）**两侧都会自己把插件叫醒**，正常情况下你什么都不用做：
+当前 loader 与面板**两侧都会自己把插件叫醒**，正常情况下你什么都不用做：
 
 | 由谁自愈 | 触发条件 | 动作 |
 | --- | --- | --- |
@@ -109,7 +137,7 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:48916/plugin/neko_theme_stu
 | verdict（第一个失败项） | 含义 | 怎么修 |
 | --- | --- | --- |
 | `loader-mounted` | `window.NekoThemeStudio` 不存在：`/static/neko-theme-studio.js` 没加载或执行报错 | 页面源码里搜 `NTS:BEGIN`，没有就是模板补丁丢了 → 重跑 `theme-studio/install.ps1` |
-| `loader-version` | loader 是旧版（本版应为 `1.4.0`） | 重启应用窗口即可：插件启动时会自己把 `plugin\static\loader\neko-theme-studio.js` 同步进 `resources\bin\static\`（带内容哈希，URL 变化自动绕开缓存）。只有连插件都没起来时才需要重跑 `install.ps1` |
+| `loader-version` | loader 是旧版（本版应为 `1.5.12`；以 `install.ps1 -Verify` 输出为准） | 重启应用窗口即可：插件启动时会自己把 `plugin\static\loader\neko-theme-studio.js` 同步进 `resources\bin\static\`（带内容哈希，URL 变化自动绕开缓存）。只有连插件都没起来时才需要重跑 `install.ps1` |
 | `css-sheet` | `<link>` 在，但样式表解析出 0 条规则（多半 404 拿到空/HTML） | 浏览器直接打开 `http://127.0.0.1:48911/static/css/neko-theme-studio.css`：应是 CSS 文本。404 就重跑 `install.ps1`（§D） |
 | `css-link` | 页面没有 `<link ...neko-theme-studio.css>` | 同上（补丁同时插 link 与 script） |
 | `fetch-theme-json` | 拉 `theme.json` 失败：插件服务没起 / 端口不对 / 跨源被拒 | 先看 `diagnose().lastReviveError`；自愈无效就回第 0.5 步手工 refresh + start |
@@ -121,7 +149,7 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:48916/plugin/neko_theme_stu
 | `var-resolves` | `--nts-*` 在当前文档解析为空 | 模式不匹配（回到 `mode-has-values`），或样式表没被浏览器接受 |
 | `bubble-colored` | 变量对了，**元素计算出来的颜色却没变** | 真的级联问题：DevTools 选中该元素 → `Styles` 面板看被划掉的规则；把截图/规则名发回 |
 
-> **文字色隔离（1.4.0 起）**：`--nts-ai-bubble-text` 只作用于 **assistant** 气泡正文，
+> **文字色隔离（loader 1.1.0 起）**：`--nts-ai-bubble-text` 只作用于 **assistant** 气泡正文，
 > `--nts-user-bubble-text` 只作用于 **user** 气泡正文（纯文本与 markdown 都算），
 > tool/system 气泡正文用 `--nts-tool-bubble-text`。若改 AI 色仍然连带改了用户文字，
 > 说明这个窗口还持有旧样式表（见第 1.5 步「陈旧样式表自愈」）：关掉聊天窗重开一次即可。
@@ -146,6 +174,19 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:48916/plugin/neko_theme_stu
    （或 `0`）。填 `18%` / `18vh` 会被面板与后端**拒绝并提示**，不会再出现「提示成功但毫无变化」。
 5. **用户气泡里的 markdown 文本不再跟 AI 文本色走**：v0.1.4 之前 `.message-block-markdown` 的颜色规则
    没有作用域，会把用户气泡里的正文一起染成 `--nts-ai-bubble-text`；本版已按气泡类型分别门控。
+
+## 安装 / 卸载 / 权限相关的新症状
+
+| 症状 | 判定 | 处理 |
+| --- | --- | --- |
+| 重装后面板是空的、之前配的调色板没了 | 安装报告里没有「已恢复用户调色板 N 个变量」 | 看 `%LOCALAPPDATA%\N.E.K.O\theme-studio-backup\userdata-<时间戳>\`（本次安装的备份，失败时会保留）；修复问题后**重跑 `install.ps1`**，它会读回备份里的 `theme.json` 与 `themes\` / `backgrounds\` / `exports\` |
+| 安装被拦：「检测到目标版本更新，跳过覆盖」 | 版本单调性守卫：目标 loader / 插件包版本 **大于** 本包 | 换用不旧于已安装版本的包；确实要降级时加 `-ForceDowngrade`（会打印告警并记入变更报告） |
+| 安装报 `写入 resources\bin 可能被拒绝（Access denied）` | 当前不是管理员，宿主目录受 UAC 保护 | 用**管理员 PowerShell** 重跑；不要用 `-ExecutionPolicy Bypass` 绕过 |
+| 控制台 `Refused to load ... because it violates Content Security Policy` | 宿主 CSP 变化，挡掉了 `/static/neko-theme-studio.js` 或注入的 `<style>` | 这是宿主安全边界，**不能靠改 loader 绕过**；按 `THEME_CONTRACT.md` §8 的安全边界讨论白名单调整 |
+| 装完立刻看还是原生色 | 只关了页面，进程（含托盘）还在用旧模板 | **完全退出 N.E.K.O（含托盘图标）后重新打开**；只按 F5 刷新不够 |
+| 模板补丁中途失败 | 安装会整批回滚模板（`backup\txn-<时间戳>\` 快照）并保留两份回滚点 | 备份与失败现场会在日志里列出；修复权限/占用后重跑，不要手工删 `backup\` |
+| `uninstall.ps1 -WhatIf` 后状态变了 | 不应发生 | `-WhatIf` 只打印计划：不写标记、不删文件、不还原模板、不向插件服务发 auto_start / stop；遇到即报 bug |
+| 卸载脚本报 `-KeepPlugin` 参数不存在 | 该参数已删除（从未生效） | 去掉该参数重跑；要保留文件请用 `-KeepAssets` |
 
 ## 回传什么
 

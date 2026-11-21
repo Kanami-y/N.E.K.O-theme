@@ -1,164 +1,275 @@
-﻿#Requires -Version 5.1
+﻿#requires -version 5.1
 <#
 .SYNOPSIS
-  把 theme-studio 打成可分发 zip（dist\neko-theme-studio-<版本>.zip）。
+    Build a deterministic, whitelisted distribution zip of the theme studio.
 
 .DESCRIPTION
-  只打包「用户真正需要的东西」：安装脚本、应用侧两件套、插件源、文档、测试与工具。
-  刻意排除：dist\（避免自我嵌套）、_work\（探针草稿）、backup\（本机备份产物）、
-  build\（中间 JSON）、__pycache__\、*.pyc、以及所有 .bak / .meta.json。
+    Outputs (into -OutDir, default <repo>\dist):
+      neko-theme-studio-<version>.zip   deterministic zip (entries sorted by path,
+                                        fixed 1980-01-01 timestamps, '/' separators)
+      neko-theme-studio-<version>.sha256  sha256 of the zip actually written
+      MANIFEST.json                     per-file sha256 + size of the zip contents
 
-  zip 内只有唯一的顶层目录 theme-studio\，解压到 N.E.K.O 安装根即可与原目录同构。
+    Determinism: running the script twice on the same inputs produces the same
+    zip bytes and therefore the same .sha256. No timestamps, machine names or
+    absolute paths are embedded.
+
+    Package whitelist:
+      plugin/plugin.toml, plugin/__init__.py, plugin/_app_patch.py,
+      plugin/materials.py, plugin/build_info.py, plugin/i18n/**,
+      plugin/static/**,
+      install.ps1, uninstall.ps1, root documentation (*.md),
+      .neko-plugin/** (optional, when present)
+    _app_patch.py / build_info.py / i18n are runtime necessities of
+    plugin/__init__.py and plugin.toml ([plugin.i18n]); they are shipped even
+    though the original whitelist sketch only named plugin.toml/__init__.py.
+
+    Excluded everywhere: __pycache__, *.pyc, *.pyo, *.tmp, .bak, _work, test,
+    tools, research, app, app-patch, dist, backup, .git, node_modules.
 
 .PARAMETER OutDir
-  输出目录，默认 <ThemeRoot>\dist。
-.PARAMETER IncludePackage
-  若 .neko-plugin 构建产物存在，一并放进 zip 根（便于绕过 install.ps1 手工导入）。
+    Output directory. Default: <repo>\dist
+
+.PARAMETER SkipManifest
+    Do not write MANIFEST.json.
+
 .EXAMPLE
-  powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\package-dist.ps1
+    powershell -NoProfile -File tools\package-dist.ps1
+    powershell -NoProfile -File tools\package-dist.ps1 -OutDir $env:TEMP\dist-test
 #>
 [CmdletBinding()]
 param(
-  [string]$ThemeRoot,
-  [string]$OutDir,
-  [switch]$IncludePackage
+    [string]$OutDir = '',
+    [switch]$SkipManifest
 )
 
 $ErrorActionPreference = 'Stop'
-$ProgressPreference    = 'SilentlyContinue'
 
-if (-not $ThemeRoot) {
-  $here = $PSScriptRoot
-  if (-not $here) { $here = Split-Path -Parent $MyInvocation.MyCommand.Definition }
-  $ThemeRoot = Split-Path -Parent $here
+$repoRoot = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($OutDir)) {
+    $OutDir = Join-Path $repoRoot 'dist'
 }
 
-if (-not $OutDir) { $OutDir = Join-Path $ThemeRoot 'dist' }
+function Write-Step([string]$Text) { Write-Host "== $Text" }
+function Write-Fail([string]$Text) { Write-Host "FAIL: $Text" -ForegroundColor Red }
 
-function Write-Step([string]$Text) { Write-Host "  $Text" }
-function Write-Fail([string]$Text) { Write-Host "  $Text" -ForegroundColor Red }
-
-# ---- 版本号：只认 plugin.toml ----------------------------------------------
-$TomlPath = Join-Path $ThemeRoot 'plugin\plugin.toml'
-if (-not (Test-Path -LiteralPath $TomlPath)) {
-  Write-Fail "找不到 $TomlPath"
-  exit 1
+# ---- version -------------------------------------------------------------
+$tomlPath = Join-Path $repoRoot 'plugin\plugin.toml'
+if (-not (Test-Path -LiteralPath $tomlPath -PathType Leaf)) {
+    Write-Fail "missing plugin/plugin.toml under $repoRoot"
+    exit 1
 }
-$TomlText = Get-Content -LiteralPath $TomlPath -Raw -Encoding UTF8
-$m = [regex]::Match($TomlText, '(?m)^\s*version\s*=\s*"([^"]+)"')
-if (-not $m.Success) {
-  Write-Fail 'plugin.toml 里没有 version 字段'
-  exit 1
+$tomlText = [System.IO.File]::ReadAllText($tomlPath)
+$verMatch = [regex]::Match($tomlText, '(?m)^\s*version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)"')
+if (-not $verMatch.Success) {
+    Write-Fail 'plugin/plugin.toml has no semantic version'
+    exit 1
 }
-$Version = $m.Groups[1].Value
+$version = $verMatch.Groups[1].Value
 
-Write-Host ''
-Write-Host '================================================================' -ForegroundColor Cyan
-Write-Host "  打包 theme-studio v$Version" -ForegroundColor Cyan
-Write-Host '================================================================' -ForegroundColor Cyan
+# ---- explicit whitelist --------------------------------------------------
+$rootFiles = @(
+    'plugin/plugin.toml',
+    'plugin/__init__.py',
+    'plugin/_app_patch.py',
+    'plugin/materials.py',
+    'plugin/build_info.py',
+    'plugin/README.md',
+    'install.ps1',
+    'uninstall.ps1',
+    'README.md',
+    'CHANGELOG.md',
+    'DISTRIBUTION.md',
+    'TROUBLESHOOT.md',
+    'THEME_CONTRACT.md',
+    'PARAMETER-REFERENCE.md',
+    'AI-THEME-GUIDE.md',
+    'USER-GUIDE.md'
+)
+$recursiveDirs = @(
+    'plugin/static',
+    'plugin/i18n'
+)
+$optionalRecursiveDirs = @(
+    '.neko-plugin'
+)
 
-# ---- 收集文件 --------------------------------------------------------------
-$ExcludeDirs  = @('dist', '_work', 'backup', 'build', '__pycache__', '.git', 'node_modules')
-$ExcludeExt   = @('.pyc', '.bak', '.pyo')
-$ExcludeNames = @('.DS_Store', 'Thumbs.db')
+$requiredEntries = @(
+    'plugin/plugin.toml',
+    'plugin/__init__.py',
+    'plugin/materials.py',
+    'plugin/static/index.html',
+    'plugin/static/app.js',
+    'plugin/static/style.css',
+    'plugin/static/materials.js',
+    'plugin/static/materials.css',
+    'plugin/static/theme.json',
+    'plugin/static/loader/neko-theme-studio.js',
+    'plugin/static/loader/neko-theme-studio.css',
+    'install.ps1',
+    'uninstall.ps1',
+    'README.md',
+    'CHANGELOG.md',
+    'DISTRIBUTION.md',
+    'USER-GUIDE.md'
+)
 
-$files = New-Object System.Collections.Generic.List[object]
-$skipped = 0
+$excludeDirNames = @('__pycache__', '_work', 'test', 'tools', 'research', 'app', 'app-patch', 'dist', 'backup', '.git', 'node_modules', '.github', '.vscode')
+$excludeFilePatterns = @('*.pyc', '*.pyo', '*.tmp', '*.bak', '*.meta.json')
 
-foreach ($f in (Get-ChildItem -LiteralPath $ThemeRoot -Recurse -File -Force)) {
-  $rel = $f.FullName.Substring($ThemeRoot.Length).TrimStart('\')
-  $parts = $rel -split '\\'
-  $drop = $false
-  foreach ($p in $parts) { if ($ExcludeDirs -contains $p) { $drop = $true; break } }
-  if (-not $drop -and ($ExcludeExt -contains $f.Extension)) { $drop = $true }
-  if (-not $drop -and ($ExcludeNames -contains $f.Name)) { $drop = $true }
-  if (-not $drop -and $f.Name -like '*.meta.json') { $drop = $true }
-  if ($drop) { $skipped++; continue }
-  $files.Add([pscustomobject]@{ Full = $f.FullName; Rel = $rel; Size = $f.Length })
+function Test-Excluded([string]$relPath) {
+    $parts = $relPath -split '/'
+    foreach ($p in $parts) {
+        if ($excludeDirNames -contains $p) { return $true }
+    }
+    $leaf = $parts[$parts.Count - 1]
+    foreach ($pattern in $excludeFilePatterns) {
+        if ($leaf -like $pattern) { return $true }
+    }
+    return $false
 }
 
-if ($files.Count -eq 0) {
-  Write-Fail '没有可打包的文件'
-  exit 1
+$names = New-Object 'System.Collections.Generic.List[string]'
+$sources = @{}
+foreach ($rel in $rootFiles) {
+    $abs = Join-Path $repoRoot ($rel -replace '/', '\')
+    if (Test-Path -LiteralPath $abs -PathType Leaf) {
+        $names.Add($rel)
+        $sources[$rel] = $abs
+    }
+}
+foreach ($relDir in $recursiveDirs) {
+    $absDir = Join-Path $repoRoot ($relDir -replace '/', '\')
+    if (-not (Test-Path -LiteralPath $absDir -PathType Container)) { continue }
+    Get-ChildItem -LiteralPath $absDir -Recurse -File | ForEach-Object {
+        $rel = $relDir + '/' + $_.FullName.Substring($absDir.Length + 1).Replace('\', '/')
+        if (-not (Test-Excluded $rel)) {
+            $names.Add($rel)
+            $sources[$rel] = $_.FullName
+        }
+    }
+}
+foreach ($relDir in $optionalRecursiveDirs) {
+    $absDir = Join-Path $repoRoot ($relDir -replace '/', '\')
+    if (-not (Test-Path -LiteralPath $absDir -PathType Container)) { continue }
+    Get-ChildItem -LiteralPath $absDir -Recurse -File | ForEach-Object {
+        $rel = $relDir + '/' + $_.FullName.Substring($absDir.Length + 1).Replace('\', '/')
+        if (-not (Test-Excluded $rel)) {
+            $names.Add($rel)
+            $sources[$rel] = $_.FullName
+        }
+    }
 }
 
-# ---- 写 zip ----------------------------------------------------------------
-if (-not (Test-Path -LiteralPath $OutDir)) { New-Item -ItemType Directory -Path $OutDir -Force | Out-Null }
-$ZipPath = Join-Path $OutDir "neko-theme-studio-$Version.zip"
-if (Test-Path -LiteralPath $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force }
+$missing = @()
+foreach ($req in $requiredEntries) {
+    if (-not $sources.ContainsKey($req)) { $missing += $req }
+}
+if ($missing.Count -gt 0) {
+    Write-Fail ('missing required package file(s): ' + ($missing -join ', '))
+    exit 1
+}
 
+# ---- deterministic ordering (ordinal, never culture-dependent) ----------
+$entryNames = $names.ToArray()
+[System.Array]::Sort($entryNames, [System.StringComparer]::Ordinal)
+
+# ---- build zip -----------------------------------------------------------
+if (-not (Test-Path -LiteralPath $OutDir -PathType Container)) {
+    New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
+}
+$zipName = "neko-theme-studio-$version.zip"
+$zipPath = Join-Path $OutDir $zipName
+$shaPath = Join-Path $OutDir ($zipName -replace '\.zip$', '.sha256')
+$manifestPath = Join-Path $OutDir 'MANIFEST.json'
+
+if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+
+# DOS timestamps are local-time based; pin the *local* wall clock to 1980-01-01
+# 00:00:00 so the archive bytes do not depend on the build machine's time zone.
+$fixedTime = [DateTimeOffset]::new([DateTime]::new(1980, 1, 1, 0, 0, 0, [DateTimeKind]::Unspecified))
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-$fs = [System.IO.File]::Open($ZipPath, [System.IO.FileMode]::CreateNew)
+$manifestFiles = New-Object System.Collections.ArrayList
+$zipStream = [System.IO.File]::Open($zipPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite)
 try {
-  $zip = New-Object System.IO.Compression.ZipArchive($fs, [System.IO.Compression.ZipArchiveMode]::Create)
-  try {
-    foreach ($item in $files) {
-      $entryName = 'theme-studio/' + ($item.Rel -replace '\\', '/')
-      [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
-        $zip, $item.Full, $entryName, [System.IO.Compression.CompressionLevel]::Optimal)
+    $archive = New-Object System.IO.Compression.ZipArchive($zipStream, [System.IO.Compression.ZipArchiveMode]::Create, $true)
+    try {
+        foreach ($rel in $entryNames) {
+            $abs = $sources[$rel]
+            $bytes = [System.IO.File]::ReadAllBytes($abs)
+            $entry = $archive.CreateEntry($rel, [System.IO.Compression.CompressionLevel]::Optimal)
+            $entry.LastWriteTime = $fixedTime
+            $entryStream = $entry.Open()
+            try {
+                $entryStream.Write($bytes, 0, $bytes.Length)
+            } finally {
+                $entryStream.Dispose()
+            }
+            $fileHash = (Get-FileHash -LiteralPath $abs -Algorithm SHA256).Hash.ToLowerInvariant()
+            [void]$manifestFiles.Add([pscustomobject]@{
+                path   = $rel
+                size   = $bytes.Length
+                sha256 = $fileHash
+            })
+        }
+    } finally {
+        $archive.Dispose()
     }
-
-    if ($IncludePackage) {
-      $pkg = Join-Path $env:LOCALAPPDATA 'N.E.K.O\.neko-plugin-packages\neko_theme_studio.neko-plugin'
-      if (Test-Path -LiteralPath $pkg) {
-        [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
-          $zip, $pkg, 'theme-studio/neko_theme_studio.neko-plugin', [System.IO.Compression.CompressionLevel]::Optimal)
-        Write-Step '已附上预构建的 neko_theme_studio.neko-plugin'
-      } else {
-        Write-Step '（未附 .neko-plugin：构建产物不存在，忽略）'
-      }
-    }
-  } finally { $zip.Dispose() }
-} finally { $fs.Dispose() }
-
-$size = (Get-Item -LiteralPath $ZipPath).Length
-$count = $files.Count
-if ($IncludePackage) { $count++ }
-
-$kb = [math]::Round($size / 1KB, 0)
-Write-Host ''
-Write-Step "打包完成：$ZipPath"
-Write-Step "  $count 个文件，$kb KB（跳过 $skipped 个排除项）"
-
-# ---- 自检：关键文件必须在包里 ----------------------------------------------
-$must = @(
-  'theme-studio/install.ps1',
-  'theme-studio/uninstall.ps1',
-  'theme-studio/plugin/plugin.toml',
-  'theme-studio/plugin/__init__.py',
-  'theme-studio/plugin/_app_patch.py',
-  'theme-studio/plugin/static/app.js',
-  'theme-studio/plugin/static/index.html',
-  'theme-studio/plugin/static/loader/neko-theme-studio.js',
-  'theme-studio/plugin/static/loader/neko-theme-studio.css',
-  'theme-studio/app/neko-theme-studio.js',
-  'theme-studio/app/css/neko-theme-studio.css',
-  'theme-studio/THEME_CONTRACT.md',
-  'theme-studio/TROUBLESHOOT.md',
-  'theme-studio/DISTRIBUTION.md',
-  'theme-studio/test/accept.ps1'
-)
-
-$zr = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
-try {
-  $names = @{}
-  foreach ($e in $zr.Entries) { $names[$e.FullName] = $true }
-  $missing = @()
-  foreach ($k in $must) { if (-not $names.ContainsKey($k)) { $missing += $k } }
-} finally { $zr.Dispose() }
-
-if ($missing.Count -gt 0) {
-  Write-Host ''
-  Write-Fail '❌ 缺少关键文件：'
-  foreach ($k in $missing) { Write-Fail "   $k" }
-  exit 1
+} finally {
+    $zipStream.Dispose()
 }
 
-Write-Step '✅ 关键文件齐全'
-Write-Host ''
-Write-Host "  解压：Expand-Archive '$ZipPath' -DestinationPath '<N.E.K.O 安装根>' -Force" -ForegroundColor DarkGray
-Write-Host "  安装：powershell -NoProfile -ExecutionPolicy Bypass -File '<安装根>\theme-studio\install.ps1'" -ForegroundColor DarkGray
-Write-Host ''
+# ---- sha256 of the actual zip bytes -------------------------------------
+$zipHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($shaPath, "$zipHash  $zipName`n", $utf8NoBom)
+
+if (-not $SkipManifest) {
+    $manifest = [ordered]@{
+        package   = $zipName
+        version   = $version
+        sha256    = $zipHash
+        fileCount = $manifestFiles.Count
+        files     = @($manifestFiles)
+    }
+    $json = $manifest | ConvertTo-Json -Depth 5
+    [System.IO.File]::WriteAllText($manifestPath, $json + "`n", $utf8NoBom)
+}
+
+# ---- self-verification: reopen and confirm contents ---------------------
+$verifyErrors = New-Object System.Collections.ArrayList
+$zipRead = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+try {
+    $actual = @($zipRead.Entries | ForEach-Object { $_.FullName })
+    if ($actual.Count -ne $entryNames.Count) {
+        [void]$verifyErrors.Add("entry count $($actual.Count) != expected $($entryNames.Count)")
+    }
+    $actualSorted = $actual.Clone()
+    [System.Array]::Sort($actualSorted, [System.StringComparer]::Ordinal)
+    for ($i = 0; $i -lt $entryNames.Count; $i++) {
+        if ($actualSorted[$i] -ne $entryNames[$i]) {
+            [void]$verifyErrors.Add("entry mismatch at $i : $($actualSorted[$i]) != $($entryNames[$i])")
+            break
+        }
+    }
+    foreach ($req in $requiredEntries) {
+        if (-not ($actual -contains $req)) { [void]$verifyErrors.Add("required entry missing from zip: $req") }
+    }
+} finally {
+    $zipRead.Dispose()
+}
+
+if ($verifyErrors.Count -gt 0) {
+    $verifyErrors | ForEach-Object { Write-Fail $_ }
+    exit 1
+}
+
+Write-Step "package v$version"
+Write-Host ("zip     : {0}  ({1} bytes, {2} files)" -f $zipPath, (Get-Item -LiteralPath $zipPath).Length, $entryNames.Count)
+Write-Host ("sha256  : {0}" -f $zipHash)
+Write-Host ("sha file: {0}" -f $shaPath)
+if (-not $SkipManifest) { Write-Host ("manifest: {0}" -f $manifestPath) }
+Write-Host 'PASS: deterministic package built and verified.'
 exit 0

@@ -22,17 +22,21 @@
   G. 报告：改了什么、还原了什么、校验哈希
 
   可重复执行（幂等）：已经回滚过的环境再跑一次不会有副作用，只会报告“无需改动”。
+  -WhatIf 语义：只显示将要做什么，绝不改任何状态 —— 不写标记、不删文件、不还原模板，
+            也不向插件服务发送 auto_start / stop 请求。
 
   硬约束（契约 §9）：
     * 绝不触碰 resources\app.asar 与 projectneko_server.exe。
     * 只删除本插件自己放进去的文件，绝不删除 backup\ 里的备份（备份永久保留）。
 
-  用法：
-    pwsh -File uninstall.ps1
-    pwsh -File uninstall.ps1 -AppRoot 'D:\tools\enokoo'
-    pwsh -File uninstall.ps1 -KeepAssets      # 只回滚模板，保留 static 下的两件套
-    pwsh -File uninstall.ps1 -Force           # 即使模板看起来正常也用最新备份整文件还原
-    pwsh -File uninstall.ps1 -WhatIf          # 只显示将要做什么，不落盘（PowerShell 内置）
+  用法（脚本未签名；请用 -NoProfile 调用，避免用户 profile 干扰）：
+    powershell -NoProfile -File uninstall.ps1
+    powershell -NoProfile -File uninstall.ps1 -AppRoot 'D:\tools\enokoo'
+    powershell -NoProfile -File uninstall.ps1 -KeepAssets   # 只回滚模板，保留 static 下的两件套
+    powershell -NoProfile -File uninstall.ps1 -Force        # 即使模板看起来正常也用最新备份整文件还原
+    powershell -NoProfile -File uninstall.ps1 -WhatIf       # 只显示将要做什么，绝不改任何状态
+  若被执行策略拦截：请改用「管理员 PowerShell」运行，或自行给脚本签名；
+  不要用 -ExecutionPolicy Bypass 绕过策略（企业环境常被策略/审计拦截）。
 ================================================================================
 #>
 
@@ -41,7 +45,6 @@ param(
     # N.E.K.O 安装根。省略时从本脚本位置自动推断（theme-studio\ 的上一级）
     [string] $AppRoot = '',
     [switch] $KeepAssets,
-    [switch] $KeepPlugin,
     # 连同「插件本体」目录一起从磁盘删除。默认关闭：该目录是全机共用的
     # %LOCALAPPDATA% 路径，不是 $AppRoot 下的东西，删它会影响真正在用的安装。
     [switch] $PurgeStaging,
@@ -726,11 +729,28 @@ if (-not $PurgeStaging) {
     Write-Info ("发现插件本体目录：{0}" -f $StagingDir)
     Write-Warn2 '你指定了 -PurgeStaging：这会从磁盘删除插件本体（不只是应用侧补丁）。'
     if ($PSCmdlet.ShouldProcess($StagingDir, '删除插件本体目录')) {
-        Remove-Item -LiteralPath $StagingDir -Recurse -Force -ErrorAction SilentlyContinue
-        if (Test-Path -LiteralPath $StagingDir) {
-            Add-Warning ("插件本体目录删除失败（可能被占用）：{0}" -f $StagingDir)
-        } else {
-            Add-Reverted ("已删除插件本体目录：{0}" -f $StagingDir)
+        # 先备份再删：插件本体目录里装着用户的**全部主题数据**
+        # （static\themes\、backgrounds\、exports\、theme.json、schedule.json）。
+        # 旧版直接 Remove-Item，手滑加一个 -PurgeStaging 就全没了、也没有回收站。
+        $purgeBackup = Join-Path (Join-Path $NekoDataDir 'theme-studio-backup') ('purged-plugin-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+        $backupOk = $false
+        try {
+            New-Item -ItemType Directory -Force -Path $purgeBackup | Out-Null
+            Copy-Item -LiteralPath $StagingDir -Destination $purgeBackup -Recurse -Force -ErrorAction Stop
+            $backupOk = $true
+            Write-Ok ("删除前已备份插件本体（含全部主题数据）→ {0}" -f $purgeBackup)
+            Add-Reverted ("删除前已备份插件本体：{0}" -f $purgeBackup)
+        } catch {
+            Add-Warning ("备份插件本体失败，已中止删除（数据太重要，不能冒险）：{0}" -f $_.Exception.Message)
+            Write-Warn2 '没有删除任何文件。可以先手动把该目录拷走，再加 -PurgeStaging 重试。'
+        }
+        if ($backupOk) {
+            Remove-Item -LiteralPath $StagingDir -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $StagingDir) {
+                Add-Warning ("插件本体目录删除失败（可能被占用）：{0}" -f $StagingDir)
+            } else {
+                Add-Reverted ("已删除插件本体目录：{0}" -f $StagingDir)
+            }
         }
     } else {
         Write-Info '  -WhatIf 预演，未删除。'
@@ -744,7 +764,10 @@ if (-not $PurgeStaging) {
 # ---------------------------------------------------------------------------
 Write-Head 'F. 停止插件运行时（尽力而为）'
 
-if (-not (Test-TcpPort -Port $PluginPort)) {
+if (-not $PSCmdlet.ShouldProcess(('插件服务 127.0.0.1:{0}' -f $PluginPort), '关闭 auto_start 并停止插件运行时')) {
+    # -WhatIf 必须完全不改状态：这里不能发任何 HTTP 请求（旧版会真的 PUT / POST 改运行态）。
+    Write-Info '  -WhatIf 预演，未调用插件服务（auto_start / stop 均未发送）。'
+} elseif (-not (Test-TcpPort -Port $PluginPort)) {
     Write-Info ("插件服务端口 {0} 未监听（应用可能没在运行），跳过；「停止自愈」标记已足以阻止下次启动重新注入。" -f $PluginPort)
 } else {
     $base = 'http://127.0.0.1:{0}' -f $PluginPort
@@ -779,10 +802,8 @@ if (-not (Test-TcpPort -Port $PluginPort)) {
 Write-Info '说明：卸载 = 删除 static 下两个文件 + 写「停止自愈」标记 + 尽力把 auto_start 置 false 并停插件。'
 Write-Info '      下次应用启动 / 插件 reload 时，插件会检测到标记并跳过自愈，主题不会回来。'
 Write-Info '      之后若重新运行 install.ps1 且安装成功，脚本会自动删除该标记（恢复自愈）。'
-if (-not $KeepPlugin) {
-    Write-Info '彻底移除插件本体：请在 N.E.K.O「插件管理」界面删除「主题工坊」，或运行本脚本时加 -PurgeStaging。'
-    Write-Info ("  数据目录：{0}" -f $NekoDataDir)
-}
+Write-Info '彻底移除插件本体：请在 N.E.K.O「插件管理」界面删除「主题工坊」，或运行本脚本时加 -PurgeStaging。'
+Write-Info ("  数据目录：{0}" -f $NekoDataDir)
 
 # ---------------------------------------------------------------------------
 # G. 报告
@@ -849,5 +870,7 @@ if ($script:Warnings.Count -gt 0) {
 }
 
 Write-Host ("  完成：已还原到未安装状态，用时 {0:N1} 秒。" -f ((Get-Date) - $StartedAt).TotalSeconds) -ForegroundColor Green
-Write-Host '  如需重新安装：pwsh -File install.ps1（安装成功会自动删除「停止自愈」标记）' -ForegroundColor Gray
+Write-Host '  重要：请完全退出 N.E.K.O（含托盘图标）后重新打开，界面才会恢复默认主题。' -ForegroundColor Cyan
+Write-Host '        只刷新页面（F5）不够：模板标记需要重启后才会被重新读取，托盘图标也必须退出。' -ForegroundColor DarkGray
+Write-Host '  如需重新安装：powershell -NoProfile -File install.ps1（安装成功会自动删除「停止自愈」标记）' -ForegroundColor Gray
 exit 0

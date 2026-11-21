@@ -1,0 +1,678 @@
+{
+    "package":  "neko-theme-studio-1.0.5.zip",
+    "version":  "1.0.5",
+    "sha256":  "5913c858261cca3e977e0402a00f7c31f8808a5d71d1f6bccb89cbe8e744aff2",
+    "fileCount":  134,
+    "files":  [
+                  {
+                      "path":  "AI-THEME-GUIDE.md",
+                      "size":  54319,
+                      "sha256":  "c83ed7004cf1a5fce41e4fc978e4033b5765c9f63ccc8b69c2743656fdfda4ac"
+                  },
+                  {
+                      "path":  "CHANGELOG.md",
+                      "size":  20872,
+                      "sha256":  "ef8a42bd2618b74ed4d57cc82e01c41fbc0ea600d334afc3f3788a2e09bfc48b"
+                  },
+                  {
+                      "path":  "DISTRIBUTION.md",
+                      "size":  21323,
+                      "sha256":  "c99cd4ec6003a8d2727de0da06df136a41b2e469eb15aabe56fbd198007aff9e"
+                  },
+                  {
+                      "path":  "PARAMETER-REFERENCE.md",
+                      "size":  34186,
+                      "sha256":  "a24f362327343fe01b99eb69cbe530ed7e1c1bcc805a789d582c09930f30859d"
+                  },
+                  {
+                      "path":  "README.md",
+                      "size":  19997,
+                      "sha256":  "c114a02904342fa44b297521914ea3b560ca3768b719b586111c9745fb8df88a"
+                  },
+                  {
+                      "path":  "THEME_CONTRACT.md",
+                      "size":  123167,
+                      "sha256":  "f224e0d6118f1dfbed73d1033ba1019d29fc0c2e36f4af5fde65891d7fee1152"
+                  },
+                  {
+                      "path":  "TROUBLESHOOT.md",
+                      "size":  16013,
+                      "sha256":  "9415e2ab6015fcd7ecf66a9a8c17a1a1c300bf037809dc8a4418400adce266d7"
+                  },
+                  {
+                      "path":  "USER-GUIDE.md",
+                      "size":  15772,
+                      "sha256":  "c5b9b61fdf02473a3212af42259ab4a81c0c9d326c2eb61d92b99e9cd8452c1d"
+                  },
+                  {
+                      "path":  "install.ps1",
+                      "size":  117946,
+                      "sha256":  "559712449ae68b998106ae82cfb7f8ff5c1d28637c29db18435dc7b3d37862ec"
+                  },
+                  {
+                      "path":  "plugin/README.md",
+                      "size":  87216,
+                      "sha256":  "7b37028db46cff4f4a4bfc67a20c1dd6d8b0e7c31c8848bb9764cc7e4b6b60e0"
+                  },
+                  {
+                      "path":  "plugin/__init__.py",
+                      "size":  232184,
+                      "sha256":  "8d4545bd8959498938a795e02b0c4a38f45aa69bdf0b6973a9969f5935979a19"
+                  },
+                  {
+                      "path":  "plugin/_app_patch.py",
+                      "size":  57903,
+                      "sha256":  "2e4a507aaed350d251856cdd9d46de7aaadf25d7bddfa4af9ae8d9157790da43"
+                  },
+                  {
+                      "path":  "plugin/build_info.py",
+                      "size":  101,
+                      "sha256":  "a426e6ecb0ed0b6c7e364ba1e40e6e788d0107370da1725a9a72dd60a1ccb00a"
+                  },
+                  {
+                      "path":  "plugin/i18n/en.json",
+                      "size":  2618,
+                      "sha256":  "b017a05c59e0a8a498021c0264fd0cc77c6486be13b9531594f9a8f80619c5d5"
+                  },
+                  {
+                      "path":  "plugin/i18n/zh-CN.json",
+                      "size":  2530,
+                      "sha256":  "707a79efa22023cc265148e7f709624d98780ff27f54c593f806c39538ed13a1"
+                  },
+                  {
+                      "path":  "plugin/materials.py",
+                      "size":  61643,
+                      "sha256":  "2cb9bc1e5a48bc0f4ae93e0c6c9785961568d17bc19fcded67f61af063ed2196"
+                  },
+                  {
+                      "path":  "plugin/plugin.toml",
+                      "size":  1859,
+                      "sha256":  "5ecf6e9502a3240e2443755a9d58ce388ccd8230922c657495233ecfda524e64"
+                  },
+                  {
+                      "path":  "plugin/static/app.js",
+                      "size":  334839,
+                      "sha256":  "f9e1a1c077dd0dfa260a77635e8d730dc35fd2db28e39dbd05d2d43348feb84f"
+                  },
+                  {
+                      "path":  "plugin/static/backgrounds/03279d7c27a231f7.jpg",
+                      "size":  346595,
+                      "sha256":  "03279d7c27a231f772a8b352c4050c32d5765fd2d7f46e62eff5b93822625b8b"
+                  },
+                  {
+                      "path":  "plugin/static/backgrounds/1fbd71acef54d52b.jpg",
+                      "size":  406412,
+                      "sha256":  "1fbd71acef54d52bff953d3b7f8e8f5d47116f104cf258bd81942f4801d2483f"
+                  },
+                  {
+                      "path":  "plugin/static/backgrounds/7d642a590cb2d089.jpg",
+                      "size":  408680,
+                      "sha256":  "7d642a590cb2d089668f7ce7a064af562786ae73058e369cb97832b11ceaa421"
+                  },
+                  {
+                      "path":  "plugin/static/index.html",
+                      "size":  23717,
+                      "sha256":  "de23a40e119486a97e224dc31cb79659e8e5989066c7b90c56960a5c2765285b"
+                  },
+                  {
+                      "path":  "plugin/static/loader/neko-theme-studio.css",
+                      "size":  167223,
+                      "sha256":  "a6a63e9ce7ca4d12d96f77155abb2b8c5e8835f51266bcd6402604572de22c4e"
+                  },
+                  {
+                      "path":  "plugin/static/loader/neko-theme-studio.js",
+                      "size":  185873,
+                      "sha256":  "8c27d53726a098b54bba8e05f6fd1d6fa8f7eb7768e223da3b4b6c174439e67e"
+                  },
+                  {
+                      "path":  "plugin/static/materials.css",
+                      "size":  23503,
+                      "sha256":  "14d832bbc28ee7ebcdf98d06b78ab9aac65a4954ec5ca9b9596320e78b0a5fae"
+                  },
+                  {
+                      "path":  "plugin/static/materials.js",
+                      "size":  59016,
+                      "sha256":  "d7a62305a3948d4d5bca261a5be0a59a1e7c0b8048c2b423683fddfd0f6373c0"
+                  },
+                  {
+                      "path":  "plugin/static/presets/amber-dusk-material.json",
+                      "size":  10525,
+                      "sha256":  "815b0078442c71800424199d4559c6ced74f1fa88195ce613887d8b5abc5c5df"
+                  },
+                  {
+                      "path":  "plugin/static/presets/amber-dusk.json",
+                      "size":  8000,
+                      "sha256":  "cdd828e6afac4024420504f4453e6308026c7bcda15d19a86f130f38ee8767e2"
+                  },
+                  {
+                      "path":  "plugin/static/presets/arctic-glass-material.json",
+                      "size":  10962,
+                      "sha256":  "084b1302e5b1f3cf2216a71968bce2aee20be81befd6533f66d99620fb22dcd0"
+                  },
+                  {
+                      "path":  "plugin/static/presets/arctic-glass.json",
+                      "size":  8442,
+                      "sha256":  "cef42b8a6912cd01e4c12b89ae7a1347107b2f728bf883311bfccd088b843a51"
+                  },
+                  {
+                      "path":  "plugin/static/presets/aurora-drift-material.json",
+                      "size":  10539,
+                      "sha256":  "49d64d8528209cf26cddedc5f849c452b02c690a331c9ba0c5f9b10f3d48ed7e"
+                  },
+                  {
+                      "path":  "plugin/static/presets/aurora-drift.json",
+                      "size":  8014,
+                      "sha256":  "00809e4dc55fbbc3ed53abc17f1cc7dcad40c231726e6a3522723f2eaafce664"
+                  },
+                  {
+                      "path":  "plugin/static/presets/aurora-flow-material.json",
+                      "size":  11349,
+                      "sha256":  "7ddb4a8e8183221377dd6c28681cda62f49c1265a5367c8a2cf69ec4e5b9d8cf"
+                  },
+                  {
+                      "path":  "plugin/static/presets/aurora-flow.json",
+                      "size":  8845,
+                      "sha256":  "b620f95ae85c6f49e5b80975eb69675c5f217f347c8b5c8e27db22c7234befff"
+                  },
+                  {
+                      "path":  "plugin/static/presets/bamboo-mist-material.json",
+                      "size":  11325,
+                      "sha256":  "a0a07500d791e1c667febf29f1578ad518e5318f56775496d766fe480a16889b"
+                  },
+                  {
+                      "path":  "plugin/static/presets/bamboo-mist.json",
+                      "size":  8821,
+                      "sha256":  "dc38761979a841bf02903bd740b6df484f255f8efa608b2c4a6449706dfa9350"
+                  },
+                  {
+                      "path":  "plugin/static/presets/caramel-latte-material.json",
+                      "size":  11320,
+                      "sha256":  "39c9c046086e231b301d15dc9dfd4a6565e43ff096bc8b4fac0499893ed53b6d"
+                  },
+                  {
+                      "path":  "plugin/static/presets/caramel-latte.json",
+                      "size":  8816,
+                      "sha256":  "778f0414e2d41a2a37b1e16872354711064594a76a9c8d94f078a5c27b9e85e8"
+                  },
+                  {
+                      "path":  "plugin/static/presets/coffee-night-material.json",
+                      "size":  10696,
+                      "sha256":  "7d180ed22b9d9ffb2d8027f673d4b9789f653e003747af555c006736b5a5c295"
+                  },
+                  {
+                      "path":  "plugin/static/presets/coffee-night.json",
+                      "size":  8164,
+                      "sha256":  "6f6281cb29f624b13f4c4acd5d0f0ca063d5d5b56c535e0b3580ec0267eece5c"
+                  },
+                  {
+                      "path":  "plugin/static/presets/coral-reef-material.json",
+                      "size":  10934,
+                      "sha256":  "ba5db06189fcb7fe81079b117257c1ad887b36d85c2c4cde59e50a3149493f9a"
+                  },
+                  {
+                      "path":  "plugin/static/presets/coral-reef.json",
+                      "size":  8412,
+                      "sha256":  "615b58e1b48e3f3f647b095e05a9fd36d2777094b2c54e984c30cbacbc3bc98c"
+                  },
+                  {
+                      "path":  "plugin/static/presets/cream-latte-material.json",
+                      "size":  10704,
+                      "sha256":  "f3c19d2934c7f3b55bc3c998755054bcbb1eff47a18b64fe2c7d80b5b343a950"
+                  },
+                  {
+                      "path":  "plugin/static/presets/cream-latte.json",
+                      "size":  8175,
+                      "sha256":  "2e99a2feace4c348620fc5c3380878a48da7e513c5150ed26c9429a6fccc5404"
+                  },
+                  {
+                      "path":  "plugin/static/presets/cyber-neon-material.json",
+                      "size":  10549,
+                      "sha256":  "a5d9447064bfdcbbd99f69b5623e39a5c0b68d0f5779647074bc4fcc4a2ea059"
+                  },
+                  {
+                      "path":  "plugin/static/presets/cyber-neon.json",
+                      "size":  8024,
+                      "sha256":  "59f15aff918ac8824cfb3eac6f6b1231114d7ba146f015aeaab6cfc45608a633"
+                  },
+                  {
+                      "path":  "plugin/static/presets/cyber-violet-material.json",
+                      "size":  10866,
+                      "sha256":  "2cb1619817776edc1ec5dcbee165bedffb6f1db40e7dba26e2e1a9a95dab0771"
+                  },
+                  {
+                      "path":  "plugin/static/presets/cyber-violet.json",
+                      "size":  8349,
+                      "sha256":  "635ade67163653346a9915eb4dbeef3a451cbb6565df2eda74b58771dafdaa3d"
+                  },
+                  {
+                      "path":  "plugin/static/presets/deep-blueprint-material.json",
+                      "size":  11316,
+                      "sha256":  "58c756f1abfa7a21831031a75e0d12c111c1a091364ac952ccb3b5f3b4502b3c"
+                  },
+                  {
+                      "path":  "plugin/static/presets/deep-blueprint.json",
+                      "size":  8812,
+                      "sha256":  "dca4ce062d4f15e8237c7a9ba0cdeb447d3e8638f3c583491c72dcd37b0a4d5f"
+                  },
+                  {
+                      "path":  "plugin/static/presets/desert-clay-material.json",
+                      "size":  10932,
+                      "sha256":  "a2cde842541a2089d09be9e14a550766fb484a4a16a80c35031c136f9a853831"
+                  },
+                  {
+                      "path":  "plugin/static/presets/desert-clay.json",
+                      "size":  8410,
+                      "sha256":  "ed95037afde91b0ed8e1be6f067c00b53df6cf24b348078a77e23ba7eb4fec36"
+                  },
+                  {
+                      "path":  "plugin/static/presets/ember-night-material.json",
+                      "size":  10854,
+                      "sha256":  "449c58abda9d43df9ec0f5e9e61af8e7ba8755cfcffda377f47fd433bf4289dd"
+                  },
+                  {
+                      "path":  "plugin/static/presets/ember-night.json",
+                      "size":  8337,
+                      "sha256":  "699ee17a13b1e7d0d33dbe5bf317166dec5122f595a693ff955f7ee7ca3d027f"
+                  },
+                  {
+                      "path":  "plugin/static/presets/frosted-sunrise-material.json",
+                      "size":  10558,
+                      "sha256":  "921fa468f7c902e39085e87ce09cec20bb612ff9c339ef24add6973d04410c36"
+                  },
+                  {
+                      "path":  "plugin/static/presets/frosted-sunrise.json",
+                      "size":  8027,
+                      "sha256":  "eae157935290743c8f131eba3cc5f41b64ca1b660c6119ea55f19aafe2dafdea"
+                  },
+                  {
+                      "path":  "plugin/static/presets/glass-crystal-material.json",
+                      "size":  11605,
+                      "sha256":  "84165199f567440a28d2f6565ef7f104dfa5dea44f8e979a921e39c09b7707ba"
+                  },
+                  {
+                      "path":  "plugin/static/presets/glass-crystal.json",
+                      "size":  9085,
+                      "sha256":  "c1c5f0cbb0744eeda67df1e784e6d81cb581d9bd1c6008130314569d42b9ea3b"
+                  },
+                  {
+                      "path":  "plugin/static/presets/glass-deepspace-material.json",
+                      "size":  11597,
+                      "sha256":  "18614dc31538bf7e07d6d473d5cb36c88b3ca6f35e5c5d6de924c39de170c7aa"
+                  },
+                  {
+                      "path":  "plugin/static/presets/glass-deepspace.json",
+                      "size":  9077,
+                      "sha256":  "81345d54dd7ad3fd975ed47be6623db2f99fd5581f327deac7c3282be0a1e697"
+                  },
+                  {
+                      "path":  "plugin/static/presets/glass-midnight-material.json",
+                      "size":  11606,
+                      "sha256":  "147d6e93b1cd36d47594e5e7b83ce32f750f17a027380530ce1a070ef32a9f74"
+                  },
+                  {
+                      "path":  "plugin/static/presets/glass-midnight.json",
+                      "size":  9086,
+                      "sha256":  "5afc3026431f1a11134640bc606f61afd570f9eba87ffe84fcf875a62f8d116b"
+                  },
+                  {
+                      "path":  "plugin/static/presets/glass-milk-material.json",
+                      "size":  11608,
+                      "sha256":  "9a28bf7eccb48be40e8ca79cb092abd1a2108367f1430ca2058bb1a3a355ac67"
+                  },
+                  {
+                      "path":  "plugin/static/presets/glass-milk.json",
+                      "size":  9088,
+                      "sha256":  "97f748960ecbf614ee7976ba3e65acd97bf7ef3faef3a8effd47c19eb1e851f3"
+                  },
+                  {
+                      "path":  "plugin/static/presets/glass-mist-material.json",
+                      "size":  11612,
+                      "sha256":  "1c5f6203b7ee82cb69743a36b217211a94365143c8415c9ff971a5558c7b44ba"
+                  },
+                  {
+                      "path":  "plugin/static/presets/glass-mist.json",
+                      "size":  9092,
+                      "sha256":  "d61634b9e3239c48901e405827e33134275b621ccbba6794604db1f77b2006eb"
+                  },
+                  {
+                      "path":  "plugin/static/presets/glass-ocean-material.json",
+                      "size":  11589,
+                      "sha256":  "2bb8ded22e1735c9872f8e6efc39ce560a17c171fec044cebeff3cb5ee5bd09b"
+                  },
+                  {
+                      "path":  "plugin/static/presets/glass-ocean.json",
+                      "size":  9069,
+                      "sha256":  "658b58280f2f64f59555ee41e5c81585132405a6a65e1ad2cae11d1d38e782d5"
+                  },
+                  {
+                      "path":  "plugin/static/presets/graphite-material.json",
+                      "size":  10036,
+                      "sha256":  "1b26afaf121e61c79f855b32342d1424db1d191e30b4d61dc07f6247b71ad160"
+                  },
+                  {
+                      "path":  "plugin/static/presets/graphite.json",
+                      "size":  7493,
+                      "sha256":  "2587c27b6682a4bd913744d97617da26c08fbf762bd1c0584d499b378b92170c"
+                  },
+                  {
+                      "path":  "plugin/static/presets/images/03279d7c27a231f7.jpg",
+                      "size":  346595,
+                      "sha256":  "03279d7c27a231f772a8b352c4050c32d5765fd2d7f46e62eff5b93822625b8b"
+                  },
+                  {
+                      "path":  "plugin/static/presets/images/1fbd71acef54d52b.jpg",
+                      "size":  406412,
+                      "sha256":  "1fbd71acef54d52bff953d3b7f8e8f5d47116f104cf258bd81942f4801d2483f"
+                  },
+                  {
+                      "path":  "plugin/static/presets/images/7d642a590cb2d089.jpg",
+                      "size":  408680,
+                      "sha256":  "7d642a590cb2d089668f7ce7a064af562786ae73058e369cb97832b11ceaa421"
+                  },
+                  {
+                      "path":  "plugin/static/presets/indigo-galaxy-material.json",
+                      "size":  11318,
+                      "sha256":  "a3d21d7d24d8e994058678b36afbc8067de3395149fef96e77564aaa5cebf18c"
+                  },
+                  {
+                      "path":  "plugin/static/presets/indigo-galaxy.json",
+                      "size":  8814,
+                      "sha256":  "123f6e90b0852e262a9b62af13433008d215bbf5140c77a7d4ae75792adef28e"
+                  },
+                  {
+                      "path":  "plugin/static/presets/ink-jade-material.json",
+                      "size":  10537,
+                      "sha256":  "d119b83c61d88ec6f2ae18bcea2bc6c75e2e3584bfd97a7b0e937ff5e5a52b9a"
+                  },
+                  {
+                      "path":  "plugin/static/presets/ink-jade.json",
+                      "size":  8003,
+                      "sha256":  "14a4fe11a3e6ac82f92c8c84377a0a911f59e6efcc07b7709245336e6460ccee"
+                  },
+                  {
+                      "path":  "plugin/static/presets/jade-court-material.json",
+                      "size":  10632,
+                      "sha256":  "38c33a6541286b3e60ba591a72b2a5a350c65ebf24e451957dcd039e56672cc4"
+                  },
+                  {
+                      "path":  "plugin/static/presets/jade-court.json",
+                      "size":  8093,
+                      "sha256":  "e7246114230c71fe3deb7133ef305fedecf9a5f0887052c742b09edeed5aa846"
+                  },
+                  {
+                      "path":  "plugin/static/presets/lavender-dusk-material.json",
+                      "size":  10956,
+                      "sha256":  "d976ccdecc296f6fea694cc3b9e8aa57c2f1d2c29b0deb36e4de93b0dbb23a2f"
+                  },
+                  {
+                      "path":  "plugin/static/presets/lavender-dusk.json",
+                      "size":  8443,
+                      "sha256":  "54d4e2bc950b4856e6ef50fe31486cbfebd476516e7098f47b946f16a8d5f6d2"
+                  },
+                  {
+                      "path":  "plugin/static/presets/lime-soda-material.json",
+                      "size":  10534,
+                      "sha256":  "6a285852149619596825645b28b3f402fb310d1e027d37641be883e4b2c84340"
+                  },
+                  {
+                      "path":  "plugin/static/presets/lime-soda.json",
+                      "size":  8003,
+                      "sha256":  "b9eb87efcd1a06753d6c53700debec8cea95fe18725ee0491aa11a83a70f61a6"
+                  },
+                  {
+                      "path":  "plugin/static/presets/matcha-latte-material.json",
+                      "size":  10927,
+                      "sha256":  "27a152e2c95d09b1efe93be42cc23c597fe4b2335b249b1da881b56bb0ef6ce7"
+                  },
+                  {
+                      "path":  "plugin/static/presets/matcha-latte.json",
+                      "size":  8414,
+                      "sha256":  "38fdbdf7131a307292c4758f9182edab166b1eb89000afaf88c64bf9a1b9bb89"
+                  },
+                  {
+                      "path":  "plugin/static/presets/midnight-glass-material.json",
+                      "size":  10554,
+                      "sha256":  "d9d8f724f527ce3df244ff643f06e23d83dfc704ac2b3142bc1fb290c9168639"
+                  },
+                  {
+                      "path":  "plugin/static/presets/midnight-glass.json",
+                      "size":  8020,
+                      "sha256":  "587f4740cea6be3ea0f6bfa2798c367fc16661dbdecbfa79c90535ec9ce8808e"
+                  },
+                  {
+                      "path":  "plugin/static/presets/mint-frost-material.json",
+                      "size":  10615,
+                      "sha256":  "618017f811c09a628518a8b6fc12179d3e99624ce996c28bfb4c5ecc87424964"
+                  },
+                  {
+                      "path":  "plugin/static/presets/mint-frost.json",
+                      "size":  8085,
+                      "sha256":  "0435e5a4f0d2d024669f891a9174e6ff2ca0f4df6b5cf53862096051e1b209be"
+                  },
+                  {
+                      "path":  "plugin/static/presets/mint-night-material.json",
+                      "size":  11302,
+                      "sha256":  "db1dee8fbec3bfaa8dc6710e2a6000a1b7915d3dd5f0a1cb2b646a0e8200b346"
+                  },
+                  {
+                      "path":  "plugin/static/presets/mint-night.json",
+                      "size":  8798,
+                      "sha256":  "6d0eea59ed6b95bbc66a16506929c68ac249a0975297879c181c6c447097c561"
+                  },
+                  {
+                      "path":  "plugin/static/presets/mono-slate-material.json",
+                      "size":  10121,
+                      "sha256":  "4469dd07468cf308fbce5eaf9f1bf32a3c5e4f9041068d709f8bd9be9363140d"
+                  },
+                  {
+                      "path":  "plugin/static/presets/mono-slate.json",
+                      "size":  7579,
+                      "sha256":  "2d496488ae6a658f5b6336c635a0878c458db7fcdaea181143941e58e3abd13a"
+                  },
+                  {
+                      "path":  "plugin/static/presets/neon-violet-material.json",
+                      "size":  11308,
+                      "sha256":  "fc9d5a8576372f6cee4e19c670d3910ba4b0147baa76e0e9d087120e9a8e7c37"
+                  },
+                  {
+                      "path":  "plugin/static/presets/neon-violet.json",
+                      "size":  8804,
+                      "sha256":  "c4ab988d79a48bc33ae1d8e17604f7ecadab84d36f029c40726fc52bedaecee2"
+                  },
+                  {
+                      "path":  "plugin/static/presets/obsidian-gold-material.json",
+                      "size":  10934,
+                      "sha256":  "0c2e428f49bf50ead75231ccdfca13f3072cc1b360f90e3fc5618f2e553d6666"
+                  },
+                  {
+                      "path":  "plugin/static/presets/obsidian-gold.json",
+                      "size":  8418,
+                      "sha256":  "3948ecd061348f810c791c75e91f2b3393693f447fab7c7c182f9983e823be65"
+                  },
+                  {
+                      "path":  "plugin/static/presets/ocean-mist-material.json",
+                      "size":  10870,
+                      "sha256":  "a474eac702a6e7585825179c8d3cee81aa228ef9e3758b47bb99c0254e03bdcd"
+                  },
+                  {
+                      "path":  "plugin/static/presets/ocean-mist.json",
+                      "size":  8349,
+                      "sha256":  "23a5cec81de61de168804688ab8edbb0f1dc178b97afc243c3914bd567f3b33a"
+                  },
+                  {
+                      "path":  "plugin/static/presets/ocean-tide-material.json",
+                      "size":  10528,
+                      "sha256":  "c95358d2713223805495f3238a9eedc05ace651590a318b9b0075f3a74edcf9b"
+                  },
+                  {
+                      "path":  "plugin/static/presets/ocean-tide.json",
+                      "size":  8003,
+                      "sha256":  "4e45379917c9fc63131dc0f3b69165cb3763aaae413c140be2f7c5bd3d6c8413"
+                  },
+                  {
+                      "path":  "plugin/static/presets/peach-fizz-material.json",
+                      "size":  10868,
+                      "sha256":  "0ec5951cc47fc91b19f2b8077f117f3031931d0d5b5e3de53e59e2369948f392"
+                  },
+                  {
+                      "path":  "plugin/static/presets/peach-fizz.json",
+                      "size":  8354,
+                      "sha256":  "2fb053d3f2f2e4b0e919a6c9e1df4d0e703bf369aad66fa7de3e59bffb0fe9b6"
+                  },
+                  {
+                      "path":  "plugin/static/presets/peach-soda-material.json",
+                      "size":  11303,
+                      "sha256":  "8a9a206cd2ca357222de281f56d1a337dd2d1fccc5fb8b004f015a64de092385"
+                  },
+                  {
+                      "path":  "plugin/static/presets/peach-soda.json",
+                      "size":  8799,
+                      "sha256":  "1cd152dba4e8881832e7e4a5a34c64dba639bd0662d995bc3841a952a7d17d66"
+                  },
+                  {
+                      "path":  "plugin/static/presets/pine-forest-material.json",
+                      "size":  10907,
+                      "sha256":  "e56bdd3ab8adea5c62dc603e3bf60707607669fa15f626b866e9fd6f5f05a634"
+                  },
+                  {
+                      "path":  "plugin/static/presets/pine-forest.json",
+                      "size":  8391,
+                      "sha256":  "a4ce52918937fa229837faa50bc8551c22367aa43f8adaa82019339a8ca52c8b"
+                  },
+                  {
+                      "path":  "plugin/static/presets/porcelain-mist-material.json",
+                      "size":  10557,
+                      "sha256":  "13f547d826a503288cf8611f17d5431faebb0f627a8bfce50c80c6222d03f526"
+                  },
+                  {
+                      "path":  "plugin/static/presets/porcelain-mist.json",
+                      "size":  8026,
+                      "sha256":  "c3db5f009e19a52c43e5e2617536bd5d2a06cd0e5e24ca2a4a2550a784502981"
+                  },
+                  {
+                      "path":  "plugin/static/presets/rose-quartz-material.json",
+                      "size":  10547,
+                      "sha256":  "4894911ae6104f9697c36acd4ae2ddf3949d2bc0f4bac54d4b99453c063b6bef"
+                  },
+                  {
+                      "path":  "plugin/static/presets/rose-quartz.json",
+                      "size":  8016,
+                      "sha256":  "db8b2d8c23abafc93313c12d257d48d9b5867a98ace9f9e771beaf1e258fa3b9"
+                  },
+                  {
+                      "path":  "plugin/static/presets/sage-garden-material.json",
+                      "size":  10530,
+                      "sha256":  "ec49f02c73b112695d60f623a39ff23c8c24bc7065ff6582d8139607adbdf020"
+                  },
+                  {
+                      "path":  "plugin/static/presets/sage-garden.json",
+                      "size":  7999,
+                      "sha256":  "120e281d3df6ea6d11ed81d647f3a1a982a82884fb8720d2d3a18aaa9cf3b9e2"
+                  },
+                  {
+                      "path":  "plugin/static/presets/sakura-mist-material.json",
+                      "size":  11312,
+                      "sha256":  "3982afe911265825b3407716089a2a9555f8bb6c0fa8762c1715ef4096cd3e07"
+                  },
+                  {
+                      "path":  "plugin/static/presets/sakura-mist.json",
+                      "size":  8808,
+                      "sha256":  "87dad8278779195fa380be7c5b54070ecc465d61b0589881920febd52557ccb8"
+                  },
+                  {
+                      "path":  "plugin/static/presets/sakura-paper-material.json",
+                      "size":  10723,
+                      "sha256":  "cc843ddf3fad8d87e0f7f4fcecbba8fb5a0adc1ca63ecd381f058bd823603b70"
+                  },
+                  {
+                      "path":  "plugin/static/presets/sakura-paper.json",
+                      "size":  8185,
+                      "sha256":  "f45dad298c59e70a676f9dda81611279e859bc7de8f1764c3e1e94a1ed6691e7"
+                  },
+                  {
+                      "path":  "plugin/static/presets/starry-meow-material.json",
+                      "size":  11653,
+                      "sha256":  "0657b1d08bddabfab4402ec4d9849a7046c596f5b1b9f7988700d1e3dbd469e6"
+                  },
+                  {
+                      "path":  "plugin/static/presets/starry-meow.json",
+                      "size":  9136,
+                      "sha256":  "e912223a2ec0c2dae324b3aeff590f52d90fe515a60f94c3ca42cff75fdc99fa"
+                  },
+                  {
+                      "path":  "plugin/static/presets/strawberry-milk-material.json",
+                      "size":  10935,
+                      "sha256":  "06e2b14a98a625d941b5547b81b228b4bc09fa0fed2a3b557a70e76c837b520a"
+                  },
+                  {
+                      "path":  "plugin/static/presets/strawberry-milk.json",
+                      "size":  8422,
+                      "sha256":  "4fed3c3800b31a73c9c43cbbbe1e3db317ccf64f20f5314a3ddca49a4091144a"
+                  },
+                  {
+                      "path":  "plugin/static/presets/sunset-molten-material.json",
+                      "size":  11304,
+                      "sha256":  "685e2596e8e65ebb440fb7434cba612e345eec78158be05544b11a8f439eab70"
+                  },
+                  {
+                      "path":  "plugin/static/presets/sunset-molten.json",
+                      "size":  8800,
+                      "sha256":  "925447faeaf435788be42d0de8bf048c878dda2b6302908cbe34f24abc9f5ffd"
+                  },
+                  {
+                      "path":  "plugin/static/presets/tangerine-sunset-material.json",
+                      "size":  10485,
+                      "sha256":  "5220385e3f70c8c37ecd11feec35a908ce033f9034b16dba151503dee1d67072"
+                  },
+                  {
+                      "path":  "plugin/static/presets/tangerine-sunset.json",
+                      "size":  7959,
+                      "sha256":  "3ee44370355ed5d0ba8583a61ea60f45ce571b70bf10e326c804c6e83d1b1f3a"
+                  },
+                  {
+                      "path":  "plugin/static/presets/violet-haze-material.json",
+                      "size":  10546,
+                      "sha256":  "cf1823ee4bec874673a84226a9f518b5f9406102a9a63a1ed50d6205b24d5971"
+                  },
+                  {
+                      "path":  "plugin/static/presets/violet-haze.json",
+                      "size":  8015,
+                      "sha256":  "7e9dfa81acffe03bef4dbab632881b27de4bd23610fb9a2003df6ab0d9f3e2b8"
+                  },
+                  {
+                      "path":  "plugin/static/presets/yui-ice-material.json",
+                      "size":  9775,
+                      "sha256":  "d5fb66c8b3583f6adea222862767327e0083e4e5dbf10a692a8b25e38d927bbb"
+                  },
+                  {
+                      "path":  "plugin/static/presets/yui-ice-moon-material.json",
+                      "size":  10931,
+                      "sha256":  "84fc4659c160e64c2b5e1a4ac898d802f18f90656d2f347542879bbe62567b23"
+                  },
+                  {
+                      "path":  "plugin/static/presets/yui-ice-moon.json",
+                      "size":  8406,
+                      "sha256":  "bfc8c1c00466d246a2c1f755d516576ef67a0ad160bb966e1f720a535c2d6512"
+                  },
+                  {
+                      "path":  "plugin/static/presets/yui-ice.json",
+                      "size":  7234,
+                      "sha256":  "9d6488d813217b5e3efcc973e2f554d6902b19b8a960cbe899e276f9cd149465"
+                  },
+                  {
+                      "path":  "plugin/static/style.css",
+                      "size":  59862,
+                      "sha256":  "648a7b91bb802752c044f8ca6ed93aebc335cb0f71278979039c06d6ab7b29eb"
+                  },
+                  {
+                      "path":  "plugin/static/theme.json",
+                      "size":  134,
+                      "sha256":  "bca1cdab80db317073de39b7af00df0d80ca4840e55a2c5014e58e7056349e2b"
+                  },
+                  {
+                      "path":  "uninstall.ps1",
+                      "size":  43569,
+                      "sha256":  "41936832fed967c7627224169db71bf4a4ce35231fc847313975bd6e7e5cbaf6"
+                  }
+              ]
+}

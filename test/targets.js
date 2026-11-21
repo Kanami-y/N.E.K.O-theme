@@ -281,13 +281,17 @@ var NTS_TARGETS = [
   { sec: 'C 输入区', sel: '#textSendButton',           prop: 'background-color', v: '--nts-send-bg',           kind: 'color' },
 
   /* ======================= D. 面板 / 弹层 / 弹窗 ======================= */
-  { sec: 'D 面板弹层', sel: '.composer-icon-popover',     prop: 'background-color', v: '--nts-popover-bg',     kind: 'color' },
-  { sec: 'D 面板弹层', sel: '.composer-icon-popover',     prop: 'color',            v: '--nts-popover-text',   kind: 'color' },
+  /* 这里原来写的是 .composer-icon-popover / .composer-overflow-menu —— 那是
+   * 透明绝对定位的**包裹层**（宿主给它 background:transparent、没有圆角），
+   * 真正的弹层是 .composer-overflow-popover。上色到包裹层的结果是：头像工具扇
+   * 和「⋯」后面出现一块直角深色板 + 方形软阴影，而同排按钮是 6px 圆角。 */
+  { sec: 'D 面板弹层', sel: '.composer-overflow-popover', prop: 'background-color', v: '--nts-popover-bg',     kind: 'color' },
+  { sec: 'D 面板弹层', sel: '.composer-overflow-popover', prop: 'color',            v: '--nts-popover-text',   kind: 'color' },
   { sec: 'D 面板弹层', sel: '.composer-overflow-popover', prop: 'background-color', v: '--nts-popover-bg',     kind: 'color' },
   { sec: 'D 面板弹层', sel: '.composer-overflow-popover', prop: 'border-top-color', v: '--nts-popover-border', kind: 'color' },
   { sec: 'D 面板弹层', sel: '.composer-overflow-popover', prop: 'border-radius',    v: '--nts-popover-radius', kind: 'length' },
-  { sec: 'D 面板弹层', sel: '.composer-overflow-menu',    prop: 'background-color', v: '--nts-popover-bg',     kind: 'color' },
-  { sec: 'D 面板弹层', sel: '.composer-overflow-menu',    prop: 'color',            v: '--nts-popover-text',   kind: 'color' },
+  /* .composer-overflow-menu 是 <ul> 本身：宿主给它 display/animation，没有背景
+   * 也没有圆角 —— 上色会从弹层的圆角外溢成直角。弹层颜色交给上面那两条。 */
   { sec: 'D 面板弹层', sel: '.composer-galgame-option',   prop: 'background-color', v: '--nts-chip-bg',        kind: 'color' },
   { sec: 'D 面板弹层', sel: '.composer-galgame-option',   prop: 'color',            v: '--nts-chip-text',      kind: 'color' },
   { sec: 'D 面板弹层', sel: '.composer-galgame-option',   prop: 'border-radius',    v: '--nts-radius',         kind: 'length' },
@@ -340,7 +344,7 @@ var NTS_TARGETS = [
   /* 阴影：原生的 box-shadow 是复合值，回退即原生当然可以写，但为了让「未配置」
      严格等于「不加载」，仍然门控。 */
   { sec: 'D 面板弹层', sel: '.composer-panel',                prop: 'box-shadow', v: '--nts-shadow', kind: 'shadow', gate: true },
-  { sec: 'D 面板弹层', sel: '.composer-icon-popover',         prop: 'box-shadow', v: '--nts-shadow', kind: 'shadow', gate: true },
+  { sec: 'D 面板弹层', sel: '.composer-overflow-popover',     prop: 'box-shadow', v: '--nts-shadow', kind: 'shadow', gate: true },
   { sec: 'D 面板弹层', sel: '.composer-overflow-popover',     prop: 'box-shadow', v: '--nts-shadow', kind: 'shadow', gate: true },
   { sec: 'D 面板弹层', sel: '.modal-dialog',                  prop: 'box-shadow', v: '--nts-shadow', kind: 'shadow', gate: true },
   { sec: 'E 推荐与chip', sel: '.proactive-recommendation-card', prop: 'box-shadow', v: '--nts-shadow', kind: 'shadow', gate: true },
@@ -398,12 +402,16 @@ var NTS_TARGETS = [
        - .compact-export-history-scroll   紧凑态真正装消息的容器
        - .message-list                    展开/全屏态真正装消息的容器
      两者都用 --nts-chat-panel-bg 门控，未配置时严格不加载。 */
-  { sec: 'B 聊天窗口', sel: '.compact-export-history-scroll', prop: 'background-color', v: '--nts-chat-panel-bg', kind: 'color' },
-  { sec: 'B 聊天窗口', sel: '.compact-export-history-scroll-content', prop: 'background-color', v: '--nts-chat-panel-bg', kind: 'color' },
   { sec: 'B 聊天窗口', sel: '.message-list',                    prop: 'background-color', v: '--nts-chat-panel-bg', kind: 'color' },
+  { sec: 'B 聊天窗口', sel: '.compact-chat-surface-frame',      prop: 'background-color', v: '--nts-chat-panel-bg', kind: 'color' },
 
-  /* 紧凑胶囊的底色仍由「聊天窗口背景」独占 —— 背板是消息列表的地板，不是胶囊。
-     两条规则的顺序无所谓，因为它们是不同的变量、不同的元素。 */
+  /* v0.4.3：`.compact-export-history-scroll` / `-content` 不再接收背板色。
+   * 实测宿主里这块浮层是「消息列表」而不是面板：它没有 border-radius、没有自己的
+   * 背景，高度是 `calc(--compact-export-history-region-height + 控件折叠增量)` 的
+   * 预留槽位，通常比气泡实际占位更高 —— 在它身上画底色 = 气泡下方多出一整块
+   * 方角色块（用户反馈：「现在面板下面又多了」）。紧凑态真正的圆角面板是胶囊
+   * `.compact-chat-surface-frame`（border-radius:999px; overflow:hidden）。
+   * 展开/全屏态的背板仍由 `.message-list` 承担。 */
 
   /* ======================= I. 悬浮 HUD =======================
      猫爪任务 HUD 由 common-ui-hud.js 用 Object.assign(el.style, …) 内联写样式，
@@ -532,7 +540,72 @@ var NTS_TARGETS = [
   { sec: 'X 辅助', sel: '.composer-panel',            prop: 'background-color', aux: true },
   { sec: 'X 辅助', sel: '.composer-visit-bar',        prop: 'background-color', aux: true },
   { sec: 'X 辅助', sel: ':focus-visible',             prop: 'outline-width',    aux: true },
-  { sec: 'X 辅助', sel: ':focus-visible',             prop: 'outline-style',    aux: true }
+  { sec: 'X 辅助', sel: ':focus-visible',             prop: 'outline-style',    aux: true },
+
+  /* ------------------------------------------------------------------------
+   * J 液态玻璃 / 自定义渐变（v0.1.11）
+   *
+   * 这些规则的变量都「未配置即不存在」：空调色板时没有任何 data-nts-* 属性，
+   * 整块 CSS 一条都不匹配。hard: true 是因为它们和 NTS_VEIL 白纱写在同一个
+   * @layer、且白纱后输出；白纱亮色选择器最高 (0,5,1)，普通门控 (0,4,1) 会输，
+   * 所以这里额外抬两枚 :root（亮 (0,6,1) / 暗 (0,8,1)）。
+   *
+   * 选择器全部在宿主 CSS 里实测存在（grep resources/bin/static/css）：
+   *   .window-topbar 8 处、.composer-input-shell 6、.compact-chat-surface-frame 12、
+   *   .composer-icon-button 10、.composer-overflow-popover 10、
+   *   .message-bubble-user 34、.message-bubble-assistant 32、.chat-body 11、
+   *   .message-list 10、.compact-export-history-bubble 104。
+   * ------------------------------------------------------------------------ */
+
+  /* —— 界面玻璃：磨砂滤镜（blur + saturate 链）—— */
+  { sec: 'J 液态玻璃', sel: '.window-topbar',                prop: 'backdrop-filter', v: '--nts-glass-filter', kind: 'filter', hard: true },
+  { sec: 'J 液态玻璃', sel: '.composer-input-shell',         prop: 'backdrop-filter', v: '--nts-glass-filter', kind: 'filter', hard: true },
+  { sec: 'J 液态玻璃', sel: '.compact-chat-surface-frame',   prop: 'backdrop-filter', v: '--nts-glass-filter', kind: 'filter', hard: true },
+  { sec: 'J 液态玻璃', sel: '.composer-icon-button',         prop: 'backdrop-filter', v: '--nts-glass-filter', kind: 'filter', hard: true },
+  { sec: 'J 液态玻璃', sel: '.composer-overflow-popover',    prop: 'backdrop-filter', v: '--nts-glass-filter', kind: 'filter', hard: true },
+
+  /* —— 界面玻璃：底色（半透明色，才会透出后面的模糊）—— */
+  { sec: 'J 液态玻璃', sel: '.window-topbar',                prop: 'background-color', v: '--nts-glass-tint', kind: 'color', hard: true },
+  { sec: 'J 液态玻璃', sel: '.composer-input-shell',         prop: 'background-color', v: '--nts-glass-tint', kind: 'color', hard: true },
+  { sec: 'J 液态玻璃', sel: '.compact-chat-surface-frame',   prop: 'background-color', v: '--nts-glass-tint', kind: 'color', hard: true },
+  { sec: 'J 液态玻璃', sel: '.composer-icon-button',         prop: 'background-color', v: '--nts-glass-tint', kind: 'color', hard: true },
+  { sec: 'J 液态玻璃', sel: '.composer-overflow-popover',    prop: 'background-color', v: '--nts-glass-tint', kind: 'color', hard: true },
+
+  /* —— 界面玻璃：高光描边（沿用既有 outline 技法，1.5px 内描边）—— */
+  { sec: 'J 液态玻璃', sel: '.window-topbar',                prop: 'outline-color', v: '--nts-glass-highlight', kind: 'color', hard: true },
+  { sec: 'J 液态玻璃', sel: '.composer-input-shell',         prop: 'outline-color', v: '--nts-glass-highlight', kind: 'color', hard: true },
+  { sec: 'J 液态玻璃', sel: '.compact-chat-surface-frame',   prop: 'outline-color', v: '--nts-glass-highlight', kind: 'color', hard: true },
+  { sec: 'J 液态玻璃', sel: '.composer-icon-button',         prop: 'outline-color', v: '--nts-glass-highlight', kind: 'color', hard: true },
+
+  /* —— 气泡玻璃：磨砂 + 半透明底 —— */
+  { sec: 'J 液态玻璃', sel: '.message-bubble-user',          prop: 'backdrop-filter',  v: '--nts-bubble-glass-filter', kind: 'filter', hard: true },
+  { sec: 'J 液态玻璃', sel: '.message-bubble-assistant',     prop: 'backdrop-filter',  v: '--nts-bubble-glass-filter', kind: 'filter', hard: true },
+  { sec: 'J 液态玻璃', sel: '.message-bubble-user',          prop: 'background-color', v: '--nts-bubble-glass-tint',   kind: 'color',  hard: true },
+  { sec: 'J 液态玻璃', sel: '.message-bubble-assistant',     prop: 'background-color', v: '--nts-bubble-glass-tint',   kind: 'color',  hard: true },
+
+  /* —— 自定义渐变：聊天区背景 —— */
+  { sec: 'J 渐变', sel: '.chat-body',                        prop: 'background-image', v: '--nts-chat-gradient', kind: 'gradient', hard: true },
+  { sec: 'J 渐变', sel: '.message-list',                     prop: 'background-image', v: '--nts-chat-gradient', kind: 'gradient', hard: true },
+
+  /* —— 自定义渐变：面板/弹窗背板 —— */
+  /* v0.4.3：`.compact-export-history-anchor`（v0.4.2 起已删）与
+   * `.compact-export-history-scroll`（本次删）都不是面板：
+   *   · anchor = position:fixed 定位锚点，无圆角、比可见面板大；
+   *   · scroll = 消息列表槽位，无圆角/无背景，高度是预留值，通常比气泡占位更高。
+   * 在它们上面铺渐变会得到「多出来的一块方角色块」（用户连续两次反馈的现象）。
+   * 紧凑态唯一真实的面板是胶囊 `.compact-chat-surface-frame`（999px 圆角、
+   * overflow:hidden → 装饰天然被裁在胶囊内）。 */
+  { sec: 'J 渐变', sel: '.compact-chat-surface-frame',       prop: 'background-image', v: '--nts-panel-gradient', kind: 'gradient', hard: true },
+
+  /* —— 自定义渐变：用户气泡（经典 + compact 两套 DOM）—— */
+  { sec: 'J 渐变', sel: '.message.user',                                                       prop: 'background-image', v: '--nts-user-bubble-gradient', kind: 'gradient', hard: true },
+  { sec: 'J 渐变', sel: '.message-bubble-user',                                                prop: 'background-image', v: '--nts-user-bubble-gradient', kind: 'gradient', hard: true },
+  { sec: 'J 渐变', sel: '.compact-export-history-message.is-user .compact-export-history-bubble', prop: 'background-image', v: '--nts-user-bubble-gradient', kind: 'gradient', hard: true },
+
+  /* —— 自定义渐变：AI 气泡 —— */
+  { sec: 'J 渐变', sel: '.message.gemini',                                                     prop: 'background-image', v: '--nts-ai-bubble-gradient', kind: 'gradient', hard: true },
+  { sec: 'J 渐变', sel: '.message-bubble-assistant',                                           prop: 'background-image', v: '--nts-ai-bubble-gradient', kind: 'gradient', hard: true },
+  { sec: 'J 渐变', sel: '.compact-export-history-message.is-assistant .compact-export-history-bubble', prop: 'background-image', v: '--nts-ai-bubble-gradient', kind: 'gradient', hard: true }
 ];
 
 /* 需要 `[data-nts-active]` 门控、且非逐变量的全局规则：由 tools/gen-css.js 写进末尾。 */
@@ -571,8 +644,11 @@ var NTS_GATED = {
   chatBackgroundImage: {
     varName: '--nts-chat-bg-image',
     sel: [
+      /* 只放**尺寸固定**的容器：容器自己的 background 在它内部内容滚动时不动，
+         所以图片既不会被滚动带走，也不会随历史变长被 cover 放大。
+         v0.4.24 曾把 `.compact-export-history-scroll-content` 也画上，它的高度
+         = 历史总高 → 图被拉伸放大、并跟着文字滚动（用户 2026-11-19 反馈）。 */
       '.compact-export-history-scroll',
-      '.compact-export-history-scroll-content',
       '.message-list',
       '.chat-body'
     ]
@@ -587,11 +663,54 @@ var NTS_GATED = {
     varName: '--nts-chat-bg-image-brightness',
     requires: '--nts-chat-bg-image',
     sel: [
+      /* 只放**尺寸固定**的容器：容器自己的 background 在它内部内容滚动时不动，
+         所以图片既不会被滚动带走，也不会随历史变长被 cover 放大。
+         v0.4.24 曾把 `.compact-export-history-scroll-content` 也画上，它的高度
+         = 历史总高 → 图被拉伸放大、并跟着文字滚动（用户 2026-11-19 反馈）。 */
       '.compact-export-history-scroll',
-      '.compact-export-history-scroll-content',
       '.message-list',
       '.chat-body'
     ]
+  },
+  /* 背景图适应方式：cover（铺满，可能裁切，原生行为）/ contain（整图可见）。
+     只覆盖 background-size —— 其它四条声明（image / position / repeat /
+     attachment）仍由上面两段负责，所以这个变量是「叠加旋钮」，单独设置不会
+     把壁纸弄没。 */
+  chatBackgroundFit: {
+    varName: '--nts-chat-bg-fit',
+    sel: [
+      '.compact-export-history-scroll',
+      '.message-list',
+      '.chat-body'
+    ]
+  },
+  /* 背景图位置：keyword（center / top / bottom / left / right）。
+   * 只写 background-position 一条声明，所以能和「背景图 / 亮度 / 适应方式 / 平铺」
+   * 任意组合 —— 每条声明各管一个子属性，互不覆盖。 */
+  chatBackgroundPosition: {
+    varName: '--nts-chat-bg-position',
+    sel: [
+      '.compact-export-history-scroll',
+      '.message-list',
+      '.chat-body'
+    ]
+  },
+  /* 背景图平铺：keyword（no-repeat / repeat / repeat-x / repeat-y）。
+   * 换一张「图案类」壁纸时用它，比如细纹理、格纹；照片类壁纸保持 no-repeat。 */
+  chatBackgroundRepeat: {
+    varName: '--nts-chat-bg-repeat',
+    sel: [
+      '.compact-export-history-scroll',
+      '.message-list',
+      '.chat-body'
+    ]
+  },
+  /* 行高：无单位倍数（ratio），只作用于聊天文本容器。
+   * 不打到 body 上 —— 那会把整套 UI（按钮、弹层、设置页）一起拉开，
+   * 用户只是想让聊天气泡里的几行字松一点。 */
+  chatLineHeight: {
+    varName: '--nts-line-height',
+    sel: ['.chat-body', '.message-markdown']
   },
   /* 顶部渐隐（用户口中的「背景图最上边那层雾」）
    * 应用在 .compact-export-history-scroll 与 .compact-export-preview-messages 上写了
@@ -609,6 +728,21 @@ var NTS_GATED = {
   shadow: {
     varName: '--nts-shadow',
     sel: ['.modal-dialog', '.composer-panel', '.composer-icon-popover', '.composer-overflow-popover', '.proactive-recommendation-card']
+  },
+  /* 文字渐变（v0.13.0）：只打在**消息文本块**上。
+   * 不能打到 .message-bubble-* 上 —— 那些元素自己有底色，一旦把
+   * background-image 换成渐变再 background-clip:text，气泡底色会被一起裁成
+   * 文字形状（气泡消失、只剩字）。文本块自己没有背景，换掉它的 background-image
+   * 是安全的。
+   * 代码块 / 行内代码另外用 currentColor 恢复实色（见 gen-css 段内的复位规则），
+   * 否则它们会继承 transparent 的 text-fill-color，变成「字看不见」。 */
+  textGradient: {
+    varName: '--nts-text-gradient',
+    sel: [
+      '.message-block-text',
+      '.message-block-text-plain',
+      '.message-block-markdown'
+    ]
   },
   /* 字体族：影响面大，只在用户显式设置时动 */
   fontFamily: { sel: '', varName: '--nts-font-family' }
@@ -698,35 +832,38 @@ var NTS_VEIL = {
 
 
 /* ============================================================================
- * 面板边缘光效 / 玻璃拟态（v0.1.11）
+ * 面板边缘光效 / 玻璃拟态（v0.1.11，v0.4.2 首次重定挂载点，v0.4.3 定案）
  * ============================================================================
- * 挂载点是实测选出来的，不是猜的：
+ * v0.4.3 结论（用户反馈：「现在面板下面又多了」）：
  *
- *   1) 外发光不能挂 .compact-export-history-scroll —— 它自带
- *      mask-image: linear-gradient(to bottom, transparent 0, rgba(0,0,0,.78) 12px, #000 28px)
- *      外发光会被这块遮罩裁掉，整图差分只测到 4 个像素变化（等于没画）。
- *      挂到父级 .compact-export-history-anchor::before 后能正常外溢 32px，
- *      且完全不碰 mask（顶部渐隐照旧）。
+ *   宿主紧凑态并没有「消息面板」这块盒子。实测 neko-chat-window.css：
+ *     .compact-export-history-anchor  position:fixed 定位锚点（无圆角、比内容大）
+ *     .compact-export-history-scroll  display:block;
+ *                                     height:calc(region-height + 控件折叠增量);
+ *                                     padding:4px 0 16px; 无背景、无 border-radius、
+ *                                     只有顶部 28px 渐隐 mask
+ *   也就是说 scroll 是一个**按预留槽位定高**的消息列表容器，消息少时它比气泡
+ *   实际占位高出一截。在它身上画底色/渐变/伪元素装饰，就会在最后一条气泡下方
+ *   多出一块方角色块 —— 这正是 0.4.2 之后用户看到的「面板下面又多了」。
  *
- *   2) 描边 / 四角高光 / 反射高光 / 内阴影 放 anchor::after。
- *      这两个伪元素在应用侧占用数为 0（.compact-export-history-anchor::before
- *      与 ::after 各 0 次），可以安全征用。
+ *   紧凑态唯一真实的面板是胶囊 `.compact-chat-surface-frame`：
+ *     border-radius:999px; overflow:hidden; position:relative;
+ *     ::before 画 --compact-chat-surface-bg（磨砂表面，z-index:0）
+ *     ::after  画顶部高光渐变 + 4 条 inset 高光（装饰层，z-index:1）
+ *   overflow:hidden 保证任何装饰都被裁在胶囊内，不可能「突出来」。
+ *   因此面板级光效全部改挂 frame::after（装饰层），磨砂/底色改挂 frame::before：
+ *   background-image / box-shadow 用「我们的层 + 宿主原生层」合成，未配置时与原样一致。
  *
- *   3) 磨砂层（背景图本身的模糊）必须夹在「容器背景」和「消息内容」之间：
- *      - 挂 scroll 的 backdrop-filter → 模糊的是 app 白底，画在 scroll 自身背景上的
- *        图片模糊不到；
- *      - 挂 anchor::after 盖在上面 → 会连消息文字一起糊；
- *      - 挂 scroll::before + z-index:-1 → 负层正好在自身背景之上、in-flow 内容之下。
- *        实测：图片区域清晰度 -62%，文字区域仅 -1%。
+ *   历史消息浮层只保留气泡级装饰（气泡自己是真实圆角盒子），不再有任何面板级绘制。
  *
  * 变量全部可选；不配置则整块 CSS 不加载（契约「未配置零变化」）。
  */
 var NTS_GLOW = {
-  /* 外发光 + 描边等装饰层的宿主 */
-  anchorSel: '.compact-export-history-anchor',
-  /* 磨砂层宿主（背景图就画在它身上） */
-  frostSel: '.compact-export-history-scroll',
-  /* 圆角跟背板圆角一致：锚点矩形与 scroll 矩形实测完全重合 */
+  /* 装饰层（光晕/描边/高光/内阴影）宿主：紧凑态真实圆角面板 */
+  anchorSel: '.compact-chat-surface-frame',
+  /* 表面层（磨砂/底色/渐变）宿主：同一个面板，挂它的 ::before（宿主磨砂层） */
+  frostSel: '.compact-chat-surface-frame',
+  /* 圆角跟背板圆角一致；装饰层用 inherit 直接跟随面板自身圆角 */
   radiusVar: '--nts-chat-panel-radius',
   /* 呼吸动画名（gen-css.js 输出 @keyframes 用） */
   breatheName: 'nts-panel-glow-breathe',

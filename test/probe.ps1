@@ -1,4 +1,4 @@
-<#
+﻿<#
   probe.ps1 -- dot-sourceable helper that runs the computed-style fixture in real headless Chrome.
   Why this exists: the stylesheet's core invariant is
       property: var(--nts-x, <NATIVE COMPUTED VALUE>) !important;

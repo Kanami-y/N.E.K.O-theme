@@ -44,6 +44,7 @@ import hashlib
 import os
 import re
 import sys
+import tempfile
 import threading
 import time
 from datetime import datetime
@@ -82,6 +83,10 @@ BACKUP_DIR_NAME = 'theme-studio-backup'
 DISABLE_FLAG_NAME = 'theme-studio-disabled'
 
 _LOCK = threading.Lock()
+
+#: 最近一次运行的模板备份失败原因。只用于诊断（repair_app 结果里可见），
+#: 让「备份失败」不再是黑盒 —— 否则用户只看到「已放弃打补丁」而没有原因。
+_BACKUP_ERRORS: list[str] = []
 
 Logger = Callable[[str, str], None]
 
@@ -249,7 +254,7 @@ def _process_image_paths() -> list[Path]:
             completed = subprocess.run(
                 ['powershell', '-NoProfile', '-NonInteractive', '-Command',
                  'Get-Process | Where-Object { $_.Path } | Select-Object -ExpandProperty Path'],
-                capture_output=True, timeout=8, check=False,
+                capture_output=True, timeout=3, check=False,
             )
             text = completed.stdout.decode('utf-8', 'replace')
         except (OSError, ValueError, subprocess.SubprocessError):
@@ -364,6 +369,7 @@ def ensure_app_patch(plugin_root: Path, log: Logger | None = None) -> dict[str, 
         'platform': None,        # sys.platform
         'platform_note': None,   # 平台层面的已知限制说明
         'plugin_root': str(plugin_root),
+        'backup_root': str(backup_root(plugin_root)),
         'autostart': None,
     }
 
@@ -396,6 +402,153 @@ def ensure_app_patch(plugin_root: Path, log: Logger | None = None) -> dict[str, 
         except Exception as exc:  # noqa: BLE001 —— 补丁失败绝不影响插件启动
             result['warnings'].append(f'应用侧补丁异常（已忽略）：{exc}')
             log('warning', f'应用侧补丁异常（已忽略）：{exc}')
+    return result
+
+
+def diagnose_app_patch(plugin_root: Path, log: Logger | None = None) -> dict[str, Any]:
+    """只读诊断：字段与 ``ensure_app_patch`` 同构，但**一个字节都不写**。
+
+    面板的「安装自检」用它：如果自检本身会修复，那它永远只能看到「已就位」，
+    也就永远发现不了「应用更新后模板标记被删了」这类真正需要人知道的问题。
+    """
+    log = log or _noop_log
+    result: dict[str, Any] = {
+        'ok': False,
+        'disabled': False,
+        'dry_run': True,
+        'needs_repair': False,
+        'app_root': None,
+        'assets_written': [],
+        'assets_unchanged': [],
+        'assets_failed': [],
+        'assets_missing': [],
+        'templates_patched': [],
+        'templates_unchanged': [],
+        'templates_skipped': [],
+        'templates_missing': [],
+        'templates_stale': [],
+        'missing_required': [],
+        'warnings': [],
+        'search_paths': [],
+        'platform': sys.platform,
+        'platform_note': _platform_note(),
+        'plugin_root': str(plugin_root),
+        'backup_root': str(backup_root(plugin_root)),
+        'autostart': None,
+    }
+
+    flag = disabled_flag_path()
+    if flag is not None:
+        try:
+            flag_exists = flag.is_file()
+        except OSError:
+            flag_exists = False
+        if flag_exists:
+            result['disabled'] = True
+            result['warnings'].append(
+                f'检测到卸载标记 {flag}：主题已被卸载（重新运行 install.ps1 可恢复）'
+            )
+            return result
+
+    loader_dir = plugin_root / 'static' / LOADER_DIR_NAME
+    sources = {
+        'neko-theme-studio.js': loader_dir / 'neko-theme-studio.js',
+        'css/neko-theme-studio.css': loader_dir / 'neko-theme-studio.css',
+    }
+    missing_sources = [name for name, path in sources.items() if not path.is_file()]
+    if missing_sources:
+        result['warnings'].append(
+            '插件包缺少应用侧资源 ' + '、'.join(missing_sources) + '，无法诊断'
+        )
+        result['needs_repair'] = True
+        return result
+
+    tried: list[str] = []
+    app_root = find_app_root(plugin_root, tried)
+    result['search_paths'] = tried
+    if app_root is None:
+        result['warnings'].append(
+            '未能定位 N.E.K.O 安装根（resources/bin/templates）；试过：'
+            + ('、'.join(tried[:6]) or '（无）')
+        )
+        result['needs_repair'] = True
+        return result
+
+    result['app_root'] = str(app_root)
+    bin_dir = app_root / 'resources' / 'bin'
+    static_dir = bin_dir / 'static'
+    template_dir = bin_dir / 'templates'
+
+    js_bytes = sources['neko-theme-studio.js'].read_bytes()
+    css_bytes = sources['css/neko-theme-studio.css'].read_bytes()
+    targets = {
+        'neko-theme-studio.js': (static_dir / 'neko-theme-studio.js', js_bytes),
+        'css/neko-theme-studio.css': (
+            static_dir / 'css' / 'neko-theme-studio.css',
+            css_bytes,
+        ),
+    }
+    for name, (dst, data) in targets.items():
+        try:
+            current = dst.read_bytes()
+        except FileNotFoundError:
+            result['assets_missing'].append(name)
+            continue
+        except OSError as exc:
+            result['assets_missing'].append(name)
+            result['warnings'].append(f'读取 {name} 失败：{exc}')
+            continue
+        if current != data:
+            result['assets_missing'].append(name)
+        else:
+            result['assets_unchanged'].append(name)
+
+    block = build_marker_block(_sha8(js_bytes), _sha8(css_bytes))
+    block_bytes = block.encode('utf-8')
+    for template_path in _discover_templates(template_dir):
+        name = template_path.name
+        try:
+            raw = template_path.read_bytes()
+        except OSError as exc:
+            result['templates_skipped'].append(name)
+            result['warnings'].append(f'{name} 读取失败，跳过（{exc}）')
+            continue
+        if block_bytes in raw:
+            result['templates_unchanged'].append(name)
+            continue
+        if MARKER_BEGIN.encode('utf-8') in raw:
+            # 有标记但哈希不是当前这套：说明应用升级过、或插件版本落后
+            result['templates_stale'].append(name)
+        elif not ANCHOR_RE.search(raw.decode('utf-8', 'replace')):
+            # 没有 dark-mode.css 锚点的页面本来就不该被注入（游戏页、局部片段等）。
+            # 只读诊断必须和 _patch_template 用同一套判据，否则「跳过」会被误报成
+            # 「缺失」——用户看到 14 个红项，点「修复」也修不掉。
+            result['templates_skipped'].append(name)
+            continue
+        else:
+            result['templates_missing'].append(name)
+        if name in REQUIRED_TEMPLATES and name not in result['templates_unchanged']:
+            result['missing_required'].append(name)
+
+    result['ok'] = not (
+        result['assets_missing']
+        or result['templates_missing']
+        or result['templates_stale']
+        or result['missing_required']
+    )
+    result['needs_repair'] = not result['ok']
+    if result['needs_repair']:
+        message = (
+            '应用侧补丁不完整：缺资源 '
+            + str(len(result['assets_missing']))
+            + ' 个 / 缺标记页面 '
+            + str(len(result['templates_missing']))
+            + ' 个 / 标记过期 '
+            + str(len(result['templates_stale']))
+            + ' 个（点「修复」可原地补齐）'
+        )
+        result['warnings'].append(message)
+        log('info', message)
     return result
 
 
@@ -545,6 +698,35 @@ def _put_autostart(base: str, plugin_id: str, value: bool) -> None:
     )
 
 
+AUTOSTART_MARKER_NAME = 'theme-studio-autostart-corrected'
+
+
+def _autostart_marker_path(plugin_root: Path) -> Path:
+    """「已经替用户校正过一次 auto_start」的标记文件路径。
+
+    为什么需要标记：install.ps1 会把新装插件的 auto_start 落盘成 false（宿主不从
+    plugin.toml 继承），所以插件第一次启动必须把它改回 true，否则重开应用主题就静默
+    失效。但用户之后可能**主动**在宿主设置里关掉自动启动 —— 如果每次启动都无条件改回
+    true，那是插件在替用户改设置（用户会看到「关了自己又开」）。
+
+    所以只校正一次：校正成功后落一个标记，此后一律尊重用户的选择。
+    标记放在 N.E.K.O 数据目录（与 theme-studio-backup 同级），不污染插件包；
+    反推不出数据目录时退回插件根。
+    """
+    data_dir = _neko_data_dir(plugin_root)
+    if data_dir is not None:
+        return data_dir / AUTOSTART_MARKER_NAME
+    return plugin_root / f'.{AUTOSTART_MARKER_NAME}'
+
+
+def _mark_autostart_corrected(plugin_root: Path, log: Logger) -> None:
+    marker = _autostart_marker_path(plugin_root)
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(datetime.now().isoformat(timespec='seconds'), encoding='utf-8')
+    except OSError as exc:  # 标记写不进去只会导致下次再校正一次，不影响功能
+        log('warning', f'记录 auto_start 校正标记失败（不影响本次会话）：{exc}')
+
 def _ensure_autostart(plugin_root: Path, log: Logger) -> None:
     """确保插件重启后会被自动拉起（并把偏好真正写进磁盘）。
 
@@ -562,6 +744,12 @@ def _ensure_autostart(plugin_root: Path, log: Logger) -> None:
     plugin_id = 'neko_theme_studio'
     if _autostart_persisted(plugin_root, plugin_id) is True:
         return  # 快路径：绝大多数启动会走到这里，一个请求都不发。
+    try:
+        if _autostart_marker_path(plugin_root).exists():
+            # 已经替用户校正过一次：之后用户主动关掉的就该尊重，不再反复改回 true。
+            return
+    except OSError:
+        pass
 
     # 等宿主走出 startup 再发请求，否则请求打回来会撞在它自己的启动锁上。
     time.sleep(3.0)
@@ -577,6 +765,7 @@ def _ensure_autostart(plugin_root: Path, log: Logger) -> None:
             continue
 
         if _autostart_persisted(plugin_root, plugin_id) is True:
+            _mark_autostart_corrected(plugin_root, log)
             log('info', f'已把插件 auto_start 打开并落盘（第 {attempt} 次尝试）')
             return
 
@@ -592,6 +781,7 @@ def _ensure_autostart(plugin_root: Path, log: Logger) -> None:
             continue
 
         if _autostart_persisted(plugin_root, plugin_id) is True:
+            _mark_autostart_corrected(plugin_root, log)
             log('info', f'已把插件 auto_start 打开并落盘（第 {attempt} 次尝试，经一次翻转为 true 触发写入）')
             return
         time.sleep(1.0)
@@ -600,6 +790,7 @@ def _ensure_autostart(plugin_root: Path, log: Logger) -> None:
 
 
 def _run(plugin_root: Path, log: Logger, result: dict[str, Any]) -> None:
+    _BACKUP_ERRORS.clear()
     loader_dir = plugin_root / "static" / LOADER_DIR_NAME
     js_src = loader_dir / "neko-theme-studio.js"
     css_src = loader_dir / "neko-theme-studio.css"
@@ -717,26 +908,18 @@ def _sync_asset(dst: Path, data: bytes, log: Logger, result: dict[str, Any], lab
         return False
 
 
-def _patch_template(template_path: Path, block: str, log: Logger, result: dict[str, Any], plugin_root: Path) -> None:
-    name = template_path.name
-    if not template_path.is_file():
-        if name in REQUIRED_TEMPLATES:
-            result['warnings'].append(f'必备模板不存在：{template_path}')
-        else:
-            result['templates_skipped'].append(name)
-        return
+def strip_marker_lines(text: str) -> tuple[str, int, bool]:
+    """剥掉文本里所有 NTS 标记段，返回（新文本，移除的行数，是否有缺 END 的残块）。
 
-    raw = template_path.read_bytes()
-    has_bom = raw.startswith(b'\xef\xbb\xbf')
-    body = raw[3:] if has_bom else raw
-    try:
-        text = body.decode('utf-8')
-    except UnicodeDecodeError as exc:
-        message = f'{name} 不是 UTF-8，跳过（{exc}）'
-        result['warnings'].append(message)
-        log('warning', message)
-        return
+    语义与 install.ps1 的 Remove-NtsBlockLines 完全一致：
+    * BEGIN..END 同行 → 只去掉两标记之间的内容，保留行内左右文字；
+    * BEGIN 与 END 跨行 → 删掉整段，保留 BEGIN 行前缀与 END 行后缀；
+    * 只有 BEGIN 没有 END（模板残缺）→ 只剥掉 BEGIN 标记文字，绝不吞掉后面的行。
 
+    抽成模块级函数是为了让「卸载（剥标记）」与「安装（剥旧标记再插）」共用同一份
+    行级状态机 —— 两份实现各写一遍迟早会在缺 END 的边角上分叉，而那条路径一旦
+    走错就是模板尾部被静默删光。
+    """
     eol = _detect_eol(text)
     lines = _split_keep_eol(text)
 
@@ -808,6 +991,41 @@ def _patch_template(template_path: Path, block: str, log: Logger, result: dict[s
             kept.append('')
         idx += 1
 
+    return ''.join(kept), removed, unterminated
+
+
+def _patch_template(template_path: Path, block: str, log: Logger, result: dict[str, Any], plugin_root: Path) -> None:
+    name = template_path.name
+    if not template_path.is_file():
+        if name in REQUIRED_TEMPLATES:
+            result['warnings'].append(f'必备模板不存在：{template_path}')
+        else:
+            result['templates_skipped'].append(name)
+        return
+
+    try:
+        raw = template_path.read_bytes()
+    except OSError as exc:
+        # 单个模板被占用（宿主读、杀软扫描、编辑器开着）不该让整轮补丁中止：
+        # 其余模板照常打，这里只记录并跳过这一个。以前的写法会让 read_bytes 的
+        # PermissionError 穿出 _run，结果是「一个模板没写成，全部模板都没打补丁」。
+        message = f'{name} 读取失败，跳过（{exc}）'
+        result['warnings'].append(message)
+        log('warning', message)
+        return
+    has_bom = raw.startswith(b'\xef\xbb\xbf')
+    body = raw[3:] if has_bom else raw
+    try:
+        text = body.decode('utf-8')
+    except UnicodeDecodeError as exc:
+        message = f'{name} 不是 UTF-8，跳过（{exc}）'
+        result['warnings'].append(message)
+        log('warning', message)
+        return
+
+    stripped_text, removed, unterminated = strip_marker_lines(text)
+    kept = _split_keep_eol(stripped_text)
+    eol = _detect_eol(text)
     if unterminated:
         message = (
             f'{name}：发现只有 BEGIN 没有 END 的残缺标记，'
@@ -828,6 +1046,21 @@ def _patch_template(template_path: Path, block: str, log: Logger, result: dict[s
         log('warning', message)
         return
     anchor = indexes[0]
+
+    # 2b) 上下文守卫（审查 P1）：ANCHOR_RE 只认 <link ... dark-mode.css>，
+    # 不辨它落在 HTML 还是内联 <script> 里。恶意/坏掉的模板可以把这行藏进
+    # <script> 字符串，插入后补丁块会变成脚本的一部分 —— 页面报语法错，
+    # 而写回校验（哨兵/标记计数）依然全过。所以锚点落在 <script> 区间内就跳过。
+    joined = ''.join(kept)
+    anchor_offset = sum(len(line) for line in kept[:anchor])
+    lowered = joined.lower()
+    script_open = lowered.rfind('<script', 0, anchor_offset)
+    script_close = lowered.rfind('</script', 0, anchor_offset)
+    if script_open >= 0 and script_open > script_close:
+        message = f'{name}：dark-mode.css 锚点落在 <script> 区间内（HTML 结构异常），跳过以免写坏脚本'
+        result['warnings'].append(message)
+        log('warning', message)
+        return
 
     # 3) 插入（补丁块独占一行，紧跟锚点之后）
     new_lines = kept[: anchor + 1] + [block + eol] + kept[anchor + 1 :]
@@ -863,8 +1096,20 @@ def _patch_template(template_path: Path, block: str, log: Logger, result: dict[s
         result['templates_unchanged'].append(name)
         return
 
-    # 5) 备份原始字节（同内容只备份一次）
-    _backup_once(template_path, raw, plugin_root, log)
+    # 5) 备份「原始模板」（= 剥掉旧标记后的内容，而不是已带标记的当前文件）。
+    #    这样重复打补丁时命中的是同一份 pristine 备份，不会每换一次资源哈希就
+    #    多写一份无意义的「已打补丁」副本 —— 既省磁盘，也避免备份目录不可写时
+    #    把「本来已经能回滚」的模板判成备份失败而拒绝修补。
+    pristine_text = ''.join(kept)
+    pristine_payload = (
+        b'\xef\xbb\xbf' + pristine_text.encode('utf-8') if has_bom else pristine_text.encode('utf-8')
+    )
+    if not _backup_once(template_path, pristine_payload, plugin_root, log):
+        detail = _BACKUP_ERRORS[-1] if _BACKUP_ERRORS else '原因未知'
+        message = f'{name}：原始模板备份失败（{detail}），已放弃打补丁（模板保持原样）'
+        result['warnings'].append(message)
+        log('warning', message)
+        return
 
     # 6) 原子写回，保持 BOM 状态
     payload = (b'\xef\xbb\xbf' + new_text.encode('utf-8')) if has_bom else new_text.encode('utf-8')
@@ -876,12 +1121,21 @@ def _patch_template(template_path: Path, block: str, log: Logger, result: dict[s
         log('warning', message)
         return
 
-    # 7) 写回后复核
-    after = template_path.read_text(encoding='utf-8-sig')
+    # 7) 写回后复核；失败立刻用内存里的原文回滚，不留半坏状态。
+    try:
+        after = template_path.read_text(encoding='utf-8-sig')
+    except OSError as exc:
+        after = ''
+        log('error', f'{name}：写回后读取失败（{exc}）')
     if JINJA_SENTINEL not in after or after.count(MARKER_BEGIN) != 1 or after.count(MARKER_END) != 1:
-        message = (
-            f'{name}：写回后复核失败，请用 {backup_root(plugin_root)} 里的原始模板备份恢复'
-        )
+        try:
+            _atomic_write(template_path, raw)
+            restored = '已用原始字节回滚'
+        except OSError as exc:
+            restored = (
+                f'回滚同样失败（{exc}），请用 {backup_root(plugin_root)} 里的备份手工恢复'
+            )
+        message = f'{name}：写回后复核失败，{restored}'
         result['warnings'].append(message)
         log('error', message)
         return
@@ -901,17 +1155,224 @@ def backup_root(plugin_root: Path) -> Path:
     return plugin_root / BACKUP_DIR_NAME
 
 
-def _backup_once(template_path: Path, raw: bytes, plugin_root: Path, log: Logger) -> None:
+def _backup_candidates(plugin_root: Path) -> list[Path]:
+    """备份落点候选目录（按优先级）。
+
+    实测：部分宿主/安全软件组合下，插件子进程会失去对
+    ``%LOCALAPPDATA%\\N.E.K.O`` 的写权限（PermissionError）；若把它当成唯一落点，
+    「备份成功才允许改模板」这条硬规则就会退化成「永远无法打补丁」。
+    所以依次尝试：LOCALAPPDATA → 插件根 → 系统临时目录。
+    """
+    override = os.environ.get('NEKO_NTS_BACKUP_DIR')
+    if override:
+        return [Path(override)]
+    candidates: list[Path] = [backup_root(plugin_root)]
+    plugin_local = plugin_root / BACKUP_DIR_NAME
+    if plugin_local not in candidates:
+        candidates.append(plugin_local)
+    temp_dir = Path(tempfile.gettempdir()) / 'neko-theme-studio-backup'
+    if temp_dir not in candidates:
+        candidates.append(temp_dir)
+    return candidates
+
+
+def _backup_once(template_path: Path, raw: bytes, plugin_root: Path, log: Logger) -> bool:
+    """备份原始模板；返回是否已有可用备份。
+
+    审查 P1：备份失败原本只记 warning 继续写，等于拿「唯一可回滚的副本」去冒险 ——
+    写了模板却没备份，用户想回退就只剩重装应用。现在备份失败就拒绝打补丁。
+    传入的 ``raw`` 应是**原始模板字节**（剥掉 NTS 标记后的内容），这样重复打补丁
+    会命中同一份备份，不必每次资源哈希变化都新写一份。
+    """
+    digest = _sha8(raw)
+    pattern = f'{template_path.name}.pristine-{digest}.*.bak'
+    for backup_dir in _backup_candidates(plugin_root):
+        try:
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            if list(backup_dir.glob(pattern)):
+                return True
+            stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+            target = backup_dir / f'{template_path.name}.pristine-{digest}.{stamp}.bak'
+            _atomic_write(target, raw)
+            if not target.is_file() or target.stat().st_size != len(raw):
+                raise OSError(f'校验失败（目标 {target}，期望 {len(raw)} 字节）')
+            log('info', f'已备份原始模板：{target.name}（{len(raw)} 字节）')
+            return True
+        except OSError as exc:
+            _BACKUP_ERRORS.append(f'{template_path.name} @ {backup_dir}: {type(exc).__name__}: {exc}')
+            log('warning', f'备份目录不可用（{backup_dir}）：{exc}')
+            continue
+    log('error', '所有备份目录都不可写，已跳过打补丁')
+    return False
+
+# ---------------------------------------------------------------------------
+# 卸载 / 恢复（0.15.5）
+# ---------------------------------------------------------------------------
+# 0.15.4 及以前，「卸载应用侧补丁」只能靠仓库根目录的 uninstall.ps1 —— 而那个脚本
+# 从来不在 .neko-plugin 包里（插件市场只装 plugin/ 子树）。结果是：用户从市场装了插件，
+# 想干净卸载时既找不到脚本、面板里也没有入口，只能手工去改 templates/*.html。
+# 这一组函数把同一件事搬到插件内部，并让「停止自愈」这件事第一次真正可执行：
+#   1. detach：写停止标记 → 剥离所有模板里的 NTS 段 → 备份并删除两件套；
+#   2. restore：删停止标记 → 走一遍 ensure_app_patch 把两件套与标记装回去。
+# 两者都幂等，都可以重复点。
+
+BOM_BYTES = bytes([0xEF, 0xBB, 0xBF])
+
+
+def is_disabled() -> bool:
+    """用户是否已「卸载应用侧补丁」（停止自愈标记存在）。"""
+    flag = disabled_flag_path()
+    if flag is None:
+        return False
     try:
-        backup_dir = backup_root(plugin_root)
-        backup_dir.mkdir(parents=True, exist_ok=True)
-        digest = _sha8(raw)
-        existing = list(backup_dir.glob(f'{template_path.name}.pristine-{digest}.*.bak'))
-        if existing:
-            return
-        stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-        target = backup_dir / f'{template_path.name}.pristine-{digest}.{stamp}.bak'
-        _atomic_write(target, raw)
-        log('info', f'已备份原始模板：{target.name}（{len(raw)} 字节）')
-    except OSError as exc:  # 备份失败不阻止打补丁，但要留痕
-        log('warning', f'备份模板失败（继续打补丁）：{exc}')
+        return flag.is_file()
+    except OSError:
+        return False
+
+
+def _write_disable_flag(log: Logger) -> Path | None:
+    flag = disabled_flag_path()
+    if flag is None:
+        log('warning', '无法确定卸载标记路径（LOCALAPPDATA 未设置），本次卸载不会跨重启保持')
+        return None
+    try:
+        flag.parent.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().isoformat(timespec='seconds')
+        _atomic_write(flag, ('disabled by theme studio panel at ' + stamp + '\n').encode('utf-8'))
+        return flag
+    except OSError as exc:
+        log('warning', '写卸载标记失败（' + str(exc) + '）；本次仍会剥离已装载的补丁，但重开应用后可能被重新安装')
+        return None
+
+
+def _remove_disable_flag(log: Logger) -> bool:
+    flag = disabled_flag_path()
+    if flag is None:
+        return False
+    try:
+        if flag.is_file():
+            flag.unlink()
+        return True
+    except OSError as exc:
+        log('warning', '删除卸载标记失败（' + str(exc) + '）')
+        return False
+
+
+def _uninstall_backup_dir(plugin_root: Path) -> Path:
+    return backup_root(plugin_root) / 'static-uninstalled'
+
+
+def detach_app_patch(plugin_root: Path, log: Logger | None = None) -> dict[str, Any]:
+    """从应用里摘掉主题：写停止标记、剥离模板标记、删除两件套（先备份）。"""
+    log = log or _noop_log
+    result: dict[str, Any] = {
+        'ok': False,
+        'disabled': True,
+        'flag': None,
+        'app_root': None,
+        'templates_cleared': [],
+        'templates_untouched': [],
+        'templates_failed': [],
+        'assets_removed': [],
+        'assets_backed_up': [],
+        'warnings': [],
+        'search_paths': [],
+    }
+
+    flag = _write_disable_flag(log)
+    result['flag'] = str(flag) if flag is not None else None
+
+    tried: list[str] = []
+    app_root = find_app_root(plugin_root, tried)
+    result['search_paths'] = tried
+    if app_root is None:
+        message = ('未能定位 N.E.K.O 安装根（resources/bin/templates），未改动模板与资源；'
+                   '停止标记已写，下次启动不会再自愈')
+        result['warnings'].append(message)
+        log('warning', message)
+        result['ok'] = flag is not None
+        return result
+
+    result['app_root'] = str(app_root)
+    bin_dir = app_root / 'resources' / 'bin'
+    static_dir = bin_dir / 'static'
+    template_dir = bin_dir / 'templates'
+
+    for template_path in _discover_templates(template_dir):
+        # _discover_templates 会把必备模板（index/chat）排在前面，即使它们并不存在。
+        # 卸载时「本来就没有这一页」不是失败，安静跳过（否则 ok 永远为 False）。
+        if not template_path.is_file():
+            continue
+        name = template_path.name
+        try:
+            raw = template_path.read_bytes()
+        except OSError as exc:
+            result['templates_failed'].append(name)
+            result['warnings'].append(name + ' 读取失败，未改动（' + str(exc) + '）')
+            continue
+        has_bom = raw.startswith(BOM_BYTES)
+        body = raw[3:] if has_bom else raw
+        try:
+            text = body.decode('utf-8')
+        except UnicodeDecodeError:
+            result['templates_failed'].append(name)
+            result['warnings'].append(name + ' 不是 UTF-8，未改动')
+            continue
+        new_text, removed, unterminated = strip_marker_lines(text)
+        if removed == 0 and not unterminated:
+            result['templates_untouched'].append(name)
+            continue
+        payload = new_text.encode('utf-8')
+        if has_bom:
+            payload = BOM_BYTES + payload
+        try:
+            # 剥离前留一份带标记的副本：万一剥离写坏，还能照着它手工恢复。
+            _backup_uninstall_copy(plugin_root, template_path, raw, log)
+            _atomic_write(template_path, payload)
+            result['templates_cleared'].append(name)
+        except OSError as exc:
+            result['templates_failed'].append(name)
+            result['warnings'].append(name + ' 写回失败（' + str(exc) + '）')
+
+    for rel in (Path('neko-theme-studio.js'), Path('css') / 'neko-theme-studio.css'):
+        target = static_dir / rel
+        try:
+            if not target.is_file():
+                continue
+            data = target.read_bytes()
+            backup = _uninstall_backup_dir(plugin_root) / rel
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            backup.write_bytes(data)
+            result['assets_backed_up'].append(str(backup))
+            target.unlink()
+            result['assets_removed'].append(str(target))
+        except OSError as exc:
+            result['warnings'].append(str(target) + ' 删除失败（' + str(exc) + '）')
+
+    result['ok'] = not result['templates_failed']
+    if result['ok']:
+        log('info', '应用侧补丁已卸载：清理 ' + str(len(result['templates_cleared'])) + ' 个模板、删除 '
+            + str(len(result['assets_removed'])) + ' 个资源文件；重开应用后主题不再出现')
+    else:
+        log('warning', '应用侧补丁卸载不完整：' + ', '.join(result['templates_failed']))
+    return result
+
+
+def _backup_uninstall_copy(plugin_root: Path, template_path: Path, raw: bytes, log: Logger) -> None:
+    """卸载前把「带标记的当前文件」另存一份，便于人工恢复。失败不阻断卸载。"""
+    try:
+        target = _uninstall_backup_dir(plugin_root) / 'templates' / template_path.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.is_file():
+            target.write_bytes(raw)
+    except OSError as exc:
+        log('warning', '卸载备份 ' + template_path.name + ' 失败（' + str(exc) + '），继续卸载')
+
+
+def restore_app_patch(plugin_root: Path, log: Logger | None = None) -> dict[str, Any]:
+    """重新装上应用侧补丁：删停止标记，然后走一遍幂等自愈。"""
+    log = log or _noop_log
+    removed = _remove_disable_flag(log)
+    result = ensure_app_patch(plugin_root, log)
+    result['flag_removed'] = removed
+    return result

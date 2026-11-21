@@ -93,15 +93,55 @@ function gateAttrFor(varName, mode) {
  *   light prefix = (0,4,1) + SEL      vs  native max (0,3,0) + SEL
  *   dark  prefix = (0,6,1) + SEL
  * Both sides carry !important, so specificity decides. */
-function gatePrefix(varName, mode) {
+function gatePrefix(varName, mode, hard) {
   var attr = gateAttrFor(varName, mode);
+  /* hard：给「渐变 / 液态玻璃」这类必须压过白纱（NTS_VEIL，本表同层且后写）
+   * 的规则再加两枚 :root。veil 的亮色选择器最高到 (0,5,1)，普通门控是
+   * (0,4,1) 且写在前面，会输；hard 把它抬到亮 (0,6,1) / 暗 (0,8,1)。 */
+  var extra = hard ? ':root:root' : '';
   return mode === 'dark'
-    ? ':root[data-theme="dark"][' + attr + ']:root:root body '
-    : ':root:not([data-theme="dark"])[' + attr + ']:root:root body ';
+    ? ':root[data-theme="dark"][' + attr + ']:root:root' + extra + ' body '
+    : ':root:not([data-theme="dark"])[' + attr + ']:root:root' + extra + ' body ';
 }
 
+/* 顶层的逗号切分：括号/方括号/引号里的逗号不算（:is(a, b)、[title="x,y"]）。 */
+function splitSelectorList(sel) {
+  var out = [];
+  var buf = '';
+  var depth = 0;
+  var quote = '';
+  for (var i = 0; i < sel.length; i += 1) {
+    var ch = sel.charAt(i);
+    if (quote) { buf += ch; if (ch === quote) quote = ''; continue; }
+    if (ch === '"' || ch === "'") { quote = ch; buf += ch; continue; }
+    if (ch === '(' || ch === '[') depth += 1;
+    else if (ch === ')' || ch === ']') depth -= 1;
+    if (ch === ',' && depth === 0) { out.push(buf.trim()); buf = ''; continue; }
+    buf += ch;
+  }
+  if (buf.trim()) out.push(buf.trim());
+  return out;
+}
+
+/* 把门控前缀贴到**每一个**选择器上。
+ *
+ * 旧实现是 prefix + sel：传进来的 "a h1, a h2, …, a h6" 只有第一个选择器吃到门控，
+ * h2..h6 变成衣不蔽体的 `color: var(--nts-ai-bubble-text) !important` —— 未设变量时
+ * var() 无效 → IACVT → unset → inherit，把宿主 h2..h6 的原生颜色整个压平（实测
+ * 18 条规则 / 90 个裸选择器）。而这份 CSS 由 <link> 常驻，空主题也生效，等于
+ * 破坏了 v3「未配置 = 不生效」的唯一不变量。
+ *
+ * 多选择器用 :is(...) 包住：门控前缀只写一次（省字节），:is 的特异性取最具体的那个
+ * 参数 —— 这些列表里的参数特异性相同，所以与逐条贴前缀等价。 */
 function joinSel(prefix, sel) {
   if (!sel) return prefix.replace(/\s+$/, '');
+  var parts = splitSelectorList(sel);
+  if (parts.length > 1) {
+    /* 伪元素不能被 :is() 包（:is(::after) 是无效选择器）→ 退回逐条贴前缀。 */
+    var hasPseudo = parts.some(function (p) { return p.indexOf('::') >= 0; });
+    if (hasPseudo) return parts.map(function (p) { return joinSel(prefix, p); }).join(',');
+    return prefix + ':is(' + parts.join(', ') + ')';
+  }
   if (sel.indexOf('::') === 0) return prefix.replace(/\s+$/, '') + ' ' + sel;
   return prefix + sel;
 }
@@ -111,6 +151,9 @@ function joinSel(prefix, sel) {
  * user actually supplied. */
 var GATE_DECL = {
   'background-color': function (v) { return ['background-color: var(' + v + ') !important;']; },
+  /* 自定义渐变（v0.1.11）：值本身就是整条 `linear-gradient(...)`，
+   * 所以直接桥到 background-image。面板只生成合法语法，校验在三端各有实现。 */
+  'background-image': function (v) { return ['background-image: var(' + v + ') !important;']; },
   'color': function (v) { return ['color: var(' + v + ') !important;']; },
   'border-color': function (v) { return ['border-color: var(' + v + ') !important;']; },
   'border-top-color': function (v) { return ['border-top-color: var(' + v + ') !important;']; },
@@ -167,7 +210,7 @@ function main() {
     /* 自定义属性（--foo）走「桥接」：值永远是 var(--nts-x)。这是紧凑胶囊
      * （--compact-chat-surface-bg 等）能像普通属性一样被变量控制的关键。 */
     if (t.prop.indexOf('--') !== 0 && !GATE_DECL[t.prop]) { warn.push('[SKIP no template] ' + t.sel + ' | ' + t.prop); return; }
-    all.push({ sec: t.sec, sel: t.sel, prop: t.prop, v: t.v, kind: t.kind, gate: true });
+    all.push({ sec: t.sec, sel: t.sel, prop: t.prop, v: t.v, kind: t.kind, gate: true, hard: !!t.hard });
   });
 
   /* ---------- gradients that would paint over a colour we control ----------
@@ -266,8 +309,8 @@ function main() {
        * the same variable makes on the same element */
       var order = [], groups = {};
       list.forEach(function (e) {
-        var k = e.v + '\u0000' + e.sel;
-        if (!groups[k]) { groups[k] = { v: e.v, sel: e.sel, props: [] }; order.push(k); }
+        var k = e.v + '\u0000' + e.sel + '\u0000' + (e.hard ? 'H' : '-');
+        if (!groups[k]) { groups[k] = { v: e.v, sel: e.sel, hard: !!e.hard, props: [] }; order.push(k); }
         groups[k].props.push(e.prop);
       });
       if (!order.length) return;
@@ -275,7 +318,7 @@ function main() {
       out.push('');
       order.forEach(function (k) {
         var g = groups[k];
-        out.push(joinSel(gatePrefix(g.v, mode), g.sel) + ' {');
+        out.push(joinSel(gatePrefix(g.v, mode, g.hard), g.sel) + ' {');
         g.props.forEach(function (p) {
           declLines(p, g.v).forEach(function (line) { out.push('  ' + line); });
         });
@@ -435,7 +478,18 @@ function main() {
       out.push(head + ' body ' + sel + ' { background-image: var(' + v + ') !important;'
         + ' background-size: cover !important;'
         + ' background-position: center center !important;'
-        + ' background-repeat: no-repeat !important; }');
+        + ' background-repeat: no-repeat !important;'
+        /* 背景"钉住"不跟着消息滚动：靠的是 **画在滚动容器自己身上 + attachment
+         * scroll**，不是 fixed。
+         *   - `scroll`：背景相对该元素的 border-box 定位，元素内部内容滚动时它不动。
+         *     这就是"背景固定"的正确做法。
+         *   - `fixed`：相对视口定位；Chrome 对这种自带合成滚动层的滚动容器会把
+         *     fixed 降级成 local（跟着内容滚），而且祖先 `.compact-chat-surface-frame`
+         *     带 backdrop-filter 又会重新定义 fixed 的包含块。v0.4.24 用 fixed 试过，
+         *     用户 2026-11-19 反馈"背景图被伸缩、随着文字移动放大移动"，就是这个原因。
+         * 另外只画在**尺寸固定**的容器上：`-content` 那种高度 = 内容总高的元素，
+         * cover 会按它的盒子缩放，历史越长图越大（"被伸缩"）。 */
+        + ' background-attachment: scroll !important; }');
     });
   });
   out.push('');
@@ -467,9 +521,129 @@ function main() {
         + ' background-image: linear-gradient(' + scrim + ',' + scrim + '), var(' + vimg + ') !important;'
         + ' background-size: cover !important;'
         + ' background-position: center center !important;'
-        + ' background-repeat: no-repeat !important; }');
+        + ' background-repeat: no-repeat !important;'
+        /* 同上：两层（蒙版 + 图片）必须同一套 attachment，否则一层动一层不动，错开。 */
+        + ' background-attachment: scroll !important; }');
     });
   });
+  out.push('');
+
+  /* ---------- chat background image fit ---------------------------------
+   * 只覆盖 background-size：cover（默认，铺满会裁切）或 contain（整图可见）。
+   * 必须排在上两段之后 —— 同特异性 + 同 !important 下后者胜出；否则这段会被
+   * 「background-size: cover」压回去，用户选了「整图可见」却看不到变化。
+   * 门控只要求 fit 变量本身：不设背景图时这条规则没有可见效果，不需要
+   * requires（也就不必担心「只设 fit 不设图」把声明写坏）。 */
+  out.push('/* ===== chat background image fit ===== */');
+  ['light', 'dark'].forEach(function (mode) {
+    var g = NTS_GATED.chatBackgroundFit;
+    var v = g.varName;
+    var attr = gateAttrFor(v, mode);
+    var head = mode === 'dark'
+      ? ':root[data-theme="dark"][' + attr + ']:root:root'
+      : ':root:not([data-theme="dark"])[' + attr + ']:root:root';
+    g.sel.forEach(function (sel) {
+      /* 只写一个值：CSS 的 background-size 在层数多于值数时会重复最后一个值，
+       * 所以只设亮度（两层：蒙版 + 图片）时也是两层都按 fit 缩放。 */
+      out.push(head + ' body ' + sel + ' { background-size: var(' + v + ') !important; }');
+    });
+  });
+  out.push('');
+
+  /* ---------- chat background position / repeat（v0.12.0）----------------
+   * 各写一条子属性，因此可以和 image / brightness / fit 任意组合；
+   * 与 fit 段一样必须排在前两段之后（同特异性同 !important 下后者胜）。
+   */
+  out.push('/* ===== chat background position / repeat ===== */');
+  ['light', 'dark'].forEach(function (mode) {
+    [NTS_GATED.chatBackgroundPosition, NTS_GATED.chatBackgroundRepeat].forEach(function (g) {
+      var attr = gateAttrFor(g.varName, mode);
+      var head = mode === 'dark'
+        ? ':root[data-theme="dark"][' + attr + ']:root:root'
+        : ':root:not([data-theme="dark"])[' + attr + ']:root:root';
+      var prop = g === NTS_GATED.chatBackgroundRepeat ? 'background-repeat' : 'background-position';
+      g.sel.forEach(function (sel) {
+        out.push(head + ' body ' + sel + ' { ' + prop + ': var(' + g.varName + ') !important; }');
+      });
+    });
+  });
+  out.push('');
+
+  /* ---------- text gradient（文字渐变，v0.13.0）----------------------------
+   * 做法是 CSS 里唯一可靠的「文字渐变」套路：
+   *   background-image: <gradient>;  background-clip: text;
+   *   -webkit-text-fill-color: transparent;
+   *
+   * 三个注意点：
+   *  1. 只能打在**没有自己背景**的文本块上（见 targets.js 的注释）；
+   *  2. `-webkit-text-fill-color` 会继承，所以代码块 / 行内代码必须显式复位成
+   *     currentColor，否则它们会变成透明文字（不可见但选中可见）；
+   *  3. 整段只在变量有值时输出（门控 attr 由加载器打），未设置时零规则、零影响。
+   */
+  out.push('/* ===== text gradient ===== */');
+  ['light', 'dark'].forEach(function (mode) {
+    var g = NTS_GATED.textGradient;
+    var attr = gateAttrFor(g.varName, mode);
+    var head = mode === 'dark'
+      ? ':root[data-theme="dark"][' + attr + ']:root:root'
+      : ':root:not([data-theme="dark"])[' + attr + ']:root:root';
+    g.sel.forEach(function (sel) {
+      out.push(head + ' body ' + sel + ' { background-image: var(' + g.varName + ') !important;'
+        + ' -webkit-background-clip: text !important; background-clip: text !important;'
+        + ' -webkit-text-fill-color: transparent !important; }');
+      /* 代码块整块反悔：恢复自己的底色，并把字恢复成实色。 */
+      out.push(head + ' body ' + sel + ' pre, ' + head + ' body ' + sel + ' code {'
+        + ' background-image: none !important; -webkit-background-clip: border-box !important;'
+        + ' background-clip: border-box !important; -webkit-text-fill-color: currentColor !important; }');
+    });
+  });
+  out.push('');
+
+  /* ---------- chat line height（v0.12.0）-----------------------------------
+   * 无单位倍数直接喂给 line-height：CSS 会按元素自身 font-size 解析，
+   * 用户改「聊天字号」时行高跟着走，不会出现「字变大、行距没变、文字粘在一起」。
+   */
+  out.push('/* ===== chat line height ===== */');
+  ['light', 'dark'].forEach(function (mode) {
+    var g = NTS_GATED.chatLineHeight;
+    var attr = gateAttrFor(g.varName, mode);
+    var head = mode === 'dark'
+      ? ':root[data-theme="dark"][' + attr + ']:root:root'
+      : ':root:not([data-theme="dark"])[' + attr + ']:root:root';
+    g.sel.forEach(function (sel) {
+      out.push(head + ' body ' + sel + ' { line-height: var(' + g.varName + ') !important; }');
+    });
+  });
+  out.push('');
+
+  /* ---------- continuous corner curvature（连续曲率圆角，v0.8.0）----------
+   * --nts-corner-style: continuous 时，把「由 --nts-*radius 控制的面」的圆角从
+   * 圆弧（quarter circle）换成超椭圆（squircle）—— iOS 那种转角过渡更顺的样子。
+   *
+   * 只有 Chrome 139+ 才有原生 `corner-shape`，所以整段包在 @supports 里：
+   * 老内核上规则不生效、外观不变（加载器仍会打 data-nts-squircle，但没消费者）。
+   *
+   * 选择器列表**从 targets 里自动收集**所有 border-radius 的 target：以后新增
+   * 圆角项不需要回来改这张表。属性值固定 squircle（不做 0-1 平滑度，避免再引入
+   * 一个没人会调的旋钮）。
+   */
+  out.push('/* ===== continuous corner curvature (corner-shape) ===== */');
+  (function () {
+    var sels = [];
+    var seen = {};
+    NTS_TARGETS.forEach(function (t) {
+      if (t.prop !== 'border-radius') return;
+      if (!t.sel || seen[t.sel]) return;
+      seen[t.sel] = 1;
+      sels.push(t.sel);
+    });
+    if (!sels.length) return;
+    out.push('@supports (corner-shape: squircle) {');
+    sels.forEach(function (sel) {
+      out.push('  :root[data-nts-squircle]:root:root body ' + sel + ' { corner-shape: squircle !important; }');
+    });
+    out.push('}');
+  })();
   out.push('');
 
   /* ---------- chat top fade（背景图最上边那层雾） --------------------------
@@ -502,34 +676,33 @@ function main() {
   out.push('');
 
 
-  /* ================= 面板边缘光效 + 玻璃拟态（v0.1.11）=================
-   * 设计与实测依据见 targets.js 的 NTS_GLOW 注释，要点三条：
-   *   · 外发光必须挂 anchor::before —— scroll 自带 mask-image 会整块裁掉外发光
-   *     （整图差分只测到 4 像素；挂父级能正常外溢 32px）。
-   *   · 描边/四角/反射/内阴影挂 anchor::after —— 应用侧这两个伪元素占用数为 0。
-   *   · 磨砂挂 scroll::before + z-index:-1 —— 负层夹在「容器自身背景（背景图）」
-   *     与「in-flow 消息内容」之间，实测图片清晰度 -62%、文字仅 -1%。
+  /* ================= 面板边缘光效 + 玻璃拟态（v0.4.3：挂到真实的圆角面板）=================
+   * 历史消息浮层（.compact-export-history-*）不是面板：没有 border-radius、没有自己
+   * 的背景，高度是 `calc(--compact-export-history-region-height + 控件折叠增量)` 的
+   * 预留槽位 —— 消息少时它比气泡实际占位高出一截。所以任何底色/渐变/伪元素装饰画在
+   * 它身上，都会在最后一条气泡下方多出一块方角色块（用户 0.4.2 后反馈「面板下面又多了」）。
    *
-   * 门控语义（关键）：每个特性只要**任一**相关变量被配置就生效，其余参数取
-   * 主题自己的文档化默认值。不能要求多个变量同时存在 —— 用户最自然的操作是
-   * 只改一个「光晕颜色」，那样会看到「设了却没反应」。CSS 选择器没有 OR，
-   * 所以同一段声明按每个可能的触发变量各输出一份。
+   * 紧凑态真实面板是胶囊 .compact-chat-surface-frame：
+   *   border-radius:999px; overflow:hidden; position:relative;
+   *   ::before → 磨砂表面（--compact-chat-surface-bg，z-index:0）
+   *   ::after  → 顶部高光渐变 + 4 条 inset 高光（装饰层，z-index:1）
+   * overflow:hidden 保证装饰被裁在胶囊内，结构上不可能再「突出来」。
    *
-   * 契约不变量仍然成立：空调色板下没有这些 data-nts-* 属性 → 所有候选选择器
-   * 都不匹配 → 零变化。这里的默认值属于「主题设计默认」，不是「测量到的原生
-   * 值」（后者才是 v3 明令禁止写进 fallback 的东西）。
+   * 因此：装饰层挂 PANEL::after，磨砂/底色挂 PANEL::before。
+   * 宿主 ::after 自带「顶部高光渐变 + 4 条 inset 高光」，我们覆盖 background-image /
+   * box-shadow 时必须把原生层合成回去（HOST_AFTER_BG / HOST_AFTER_INSETS），否则
+   * 未配置这些变量的主题也会掉一层原有高光，违反「未配置零变化」契约。
    *
-   * box-shadow / background-image 会被后写的规则整体覆盖，所以不能「每个特性
-   * 各写一条」。这里用中间自定义属性解耦，最后由合成规则读 var(--x, <无操作值>)
-   * 拼起来。
+   * 门控语义不变：任一相关变量被配置就生效，其余取主题默认值（CSS 没有 OR，
+   * 同一段声明按每个触发变量各输出一份）。
    */
   (function emitGlowAndGlass() {
     var V = NTS_GLOW.vars;
-    var anchor = NTS_GLOW.anchorSel;
-    var frost = NTS_GLOW.frostSel;
-    var RADIUS = 'var(' + NTS_GLOW.radiusVar + ', 0px)';
+    var PANEL = NTS_GLOW.anchorSel;
+    var SURF = NTS_GLOW.frostSel;
+    var DECO = PANEL + '::after';
+    var FROST = SURF + '::before';
 
-    /* 亮/暗共用的门控前缀 */
     function head(mode) {
       return mode === 'dark'
         ? ':root[data-theme="dark"]'
@@ -543,15 +716,12 @@ function main() {
       return parts.join('');
     }
 
-    /* 一份声明 × 每个触发变量各一条规则（模拟 OR） */
     function orRule(mode, triggers, target, decls) {
       triggers.forEach(function (t) {
         out.push(sel(mode, [t]) + ' ' + target + ' { ' + decls.join(' ') + ' }');
       });
     }
 
-    /* 把任意 CSS 颜色按百分比混到透明上。color-mix 实测可用；用户给的颜色可能
-     * 是 hex / 颜色名 / rgb()，无法拆通道再拼 alpha，只能走 color-mix。 */
     function tint(colorVar, amountExpr, def) {
       return 'color-mix(in srgb, var(' + colorVar + ', ' + def + ')'
         + ' calc(' + amountExpr + ' * 100%), transparent)';
@@ -565,17 +735,38 @@ function main() {
     out.push('/* ===== panel edge glow + glassmorphism ===== */');
 
     /* ---------- 呼吸动画（亮暗共用，只输出一次）----------
-     * 最低不透明度 = 1 - pulse：pulse 1 → 到 0；0.5 → 到 0.5；0 → 恒定 1。
-     * 因此「呼吸幅度」一个人就能控制呼吸强弱，不需要额外开关。 */
+     * 挂在装饰层 ::after 上：opacity 只影响高光层，不影响面板本体。 */
     out.push('@keyframes ' + NTS_GLOW.breatheName + ' {'
       + ' 0%, 100% { opacity: 1; }'
-      + ' 50% { opacity: calc(1 - var(' + V.glowPulse + ', 0)); }'
+      + ' 50% { opacity: calc(1 - var(' + V.glowPulse + ', 0.25)); }'
       + ' }');
 
-    var GLOW_SHADOW = '0 0'
-      + ' calc(var(' + V.glowSize + ', 24px) * var(' + V.glowStrength + ', 1))'
-      + ' calc(var(' + V.glowSize + ', 24px) * 0.42 * var(' + V.glowStrength + ', 1))'
-      + ' ' + tint(V.glowColor, 'var(' + V.glowStrength + ', 1)', '#ffffff');
+    /* 内发光：inset 天然跟随 border-radius。亮色白发光打在浅底上看不见，
+     * 所以先垫一层低透明中性暗晕做承托。 */
+    function glowShadow(mode) {
+      var colored = 'inset 0 0'
+        + ' calc(var(' + V.glowSize + ', 24px) * var(' + V.glowStrength + ', 1))'
+        + ' calc(var(' + V.glowSize + ', 24px) * 0.42 * var(' + V.glowStrength + ', 1))'
+        + ' ' + tint(V.glowColor, 'var(' + V.glowStrength + ', 1)', '#ffffff');
+      if (mode !== 'light') return colored;
+      return 'inset 0 0'
+        + ' calc(var(' + V.glowSize + ', 24px) * 1.35 * var(' + V.glowStrength + ', 1))'
+        + ' calc(var(' + V.glowSize + ', 24px) * 0.55 * var(' + V.glowStrength + ', 1))'
+        + ' rgba(24, 28, 38, calc(0.10 * var(' + V.glowStrength + ', 1))), '
+        + colored;
+    }
+
+    /* 宿主 .compact-chat-surface-frame::after 的原生声明（逐字抄自宿主 CSS）。
+     * 覆盖这两个属性时必须把它们排在最后合成回去。若宿主未来改动，最坏结果是
+     * 面板少一层原生高光，不会破版。 */
+    var HOST_AFTER_BG = 'linear-gradient(180deg, var(--compact-chat-surface-glow) 0%,'
+      + ' rgba(255,255,255,calc(.05 * var(--neko-chat-opacity-factor, 1))) 16%,'
+      + ' transparent 40%, transparent 82%,'
+      + ' rgba(115,181,229,calc(.05 * var(--neko-chat-opacity-factor, 1))) 100%)';
+    var HOST_AFTER_INSETS = 'inset 0 2px 6px var(--compact-chat-highlight-top),'
+      + ' inset 0 -1px 3px var(--compact-chat-highlight-bottom),'
+      + ' inset 2px 0 4px var(--compact-chat-highlight-left),'
+      + ' inset -2px 0 4px var(--compact-chat-highlight-right)';
 
     var CORNER_C = 'calc(var(' + V.cornerGlow + ', 1) * 0.95)';
     var CORNERS = ['0% 0%', '100% 0%', '0% 100%', '100% 100%'].map(function (pos) {
@@ -596,115 +787,92 @@ function main() {
       + ' calc(18px * var(' + V.innerGlow + ', 1))'
       + ' calc(2px * var(' + V.innerGlow + ', 1)) rgba(0,0,0,.35)';
 
-    /* ::after 的结构声明必须写进**每一组** ::after 规则。
-     * 没有 `content` 的伪元素根本不会被生成，浏览器把整条规则当成不存在；而
-     * getComputedStyle 依然会报出 border / background-image / box-shadow 的值，
-     * 所以只有像素能证明 —— 实测把 border 设成 6px 纯绿时，整屏 0 个绿像素。
-     * 换句话说 `border` / 四角高光 / 玻璃反射 / 内阴影这四组曾经全部是死的。 */
-
-    /* 顶部对齐：应用在 .compact-export-history-scroll 上写死了
-     *     mask-image: linear-gradient(to bottom, transparent 0, rgba(0,0,0,.78) 12px, #000 28px)
-     * 所以「面板可见的顶边」比盒子顶边低约 28px，盒子顶上那 28px 是渐隐的。
-     * 光晕与描边画在**盒子**上、且不受这条 mask 影响，于是会浮在面板上方一截
-     * 没有底板支撑的弧线（用户原话：「最上面比面板高出一截」）。
-     *
-     * 修法：给两个伪元素的 top 加上同一条渐隐带的厚度。不要改成套 mask ——
-     * mask 的绘制区就是边框盒，装不进外发光（外溢部分会被整块裁掉，实测整屏
-     * 光晕归零）。只推 top 是对的：bottom/left/right 仍是 0，只有顶边跟着
-     * 「可见的板边」走；--nts-chat-top-fade 调小时渐隐收窄，顶边也一起回来。 */
-    var TOP_INSET = 'calc(28px * var(--nts-chat-top-fade, 1))';
-
-    var AFTER_STRUCT = [
+    /* 装饰层结构：伪元素必须有 content 才会生成盒子；圆角直接 inherit 跟随胶囊。 */
+    var DECO_STRUCT = [
       'content: "" !important;',
       'position: absolute !important;',
       'inset: 0 !important;',
-      'top: ' + TOP_INSET + ' !important;',
       'pointer-events: none !important;',
-      'border-radius: ' + RADIUS + ' !important;'
+      'border-radius: inherit !important;'
     ];
 
+    var reducedMotion = [];
     ['light', 'dark'].forEach(function (mode) {
-      /* ========== ① 外发光（anchor::before）========== */
-      orRule(mode, [V.glowColor, V.glowStrength, V.glowSize], anchor + '::before', [
-        'content: "" !important;',
-        'position: absolute !important;',
-        'inset: 0 !important;',
-        'top: ' + TOP_INSET + ' !important;',
-        'pointer-events: none !important;',
-        'border-radius: ' + RADIUS + ' !important;',
-        'box-shadow: ' + GLOW_SHADOW + ' !important;'
-      ]);
+      /* ① 内发光 */
+      orRule(mode, [V.glowColor, V.glowStrength, V.glowSize], DECO, DECO_STRUCT.concat([
+        'box-shadow: ' + glowShadow(mode) + ', ' + HOST_AFTER_INSETS + ' !important;'
+      ]));
 
-      /* ========== ② 呼吸（只由 pulse 触发；速度取默认 3.2s）========== */
-      orRule(mode, [V.glowPulse], anchor + '::before', [
+      /* ② 呼吸（pulse 或 speed 任一触发；速度默认 3.2s） */
+      orRule(mode, [V.glowPulse, V.glowSpeed], DECO, DECO_STRUCT.concat([
+        'box-shadow: ' + glowShadow(mode) + ', ' + HOST_AFTER_INSETS + ' !important;',
         'animation: ' + NTS_GLOW.breatheName
         + ' var(' + V.glowSpeed + ', 3.2s) ease-in-out infinite !important;'
-      ]);
-      /* 尊重系统的「减少动态效果」，与应用自身的做法一致 */
-      out.push('@media (prefers-reduced-motion: reduce) {');
-      out.push('  ' + sel(mode, [V.glowPulse]) + ' ' + anchor + '::before'
-        + ' { animation: none !important; }');
-      out.push('}');
+      ]));
+      /* reduced-motion 的关动画选择器必须与动画规则一一对应（OR），
+       * 不能写成 `[pulse][speed]` 双门控：动画是「任一变量」就会触发，
+       * 而双门控只有「两个都设了」才生效，于是只设一个变量的用户在
+       * 「减少动态效果」下照样看见呼吸动画。 */
+      reducedMotion.push(sel(mode, [V.glowPulse]) + ' ' + DECO);
+      reducedMotion.push(sel(mode, [V.glowSpeed]) + ' ' + DECO);
 
-      /* ========== ③ 半透明描边（任一只需其一）========== */
-      orRule(mode, [V.borderColor, V.borderWidth], anchor + '::after', AFTER_STRUCT.concat([
+      /* ③ 半透明描边 */
+      orRule(mode, [V.borderColor, V.borderWidth], DECO, DECO_STRUCT.concat([
         'border: var(' + V.borderWidth + ', 1.5px) solid'
         + ' var(' + V.borderColor + ', rgba(255,255,255,.55)) !important;'
       ]));
 
-      /* ========== ④ 四角高光 ========== */
-      orRule(mode, [V.cornerGlow], anchor + '::after', AFTER_STRUCT.concat([
+      /* ④ 四角高光 */
+      orRule(mode, [V.cornerGlow], DECO, DECO_STRUCT.concat([
         '--nts-panel-corner-bg: ' + CORNERS + ' !important;'
       ]));
 
-      /* ========== ⑤ 玻璃反射高光 ========== */
-      orRule(mode, [V.sheen], anchor + '::after', AFTER_STRUCT.concat([
+      /* ⑤ 玻璃反射高光 */
+      orRule(mode, [V.sheen], DECO, DECO_STRUCT.concat([
         '--nts-panel-sheen-bg: ' + SHEEN_BG + ' !important;'
       ]));
 
-      /* ④+⑤ 合成 background-image：反射高光在上、四角在下。
-       * 只要四角或反射任一被配置，合成规则就必须存在（否则先设的那个丢失）。 */
-      var BG_FALLBACK = 'var(--nts-panel-sheen-bg, none), var(--nts-panel-corner-bg, none)';
-      orRule(mode, [V.cornerGlow, V.sheen], anchor + '::after', AFTER_STRUCT.concat([
-        'background-image: ' + BG_FALLBACK + ' !important;',
+      /* ④+⑤ 合成 background-image：我们的层在上，宿主原生高光渐变在最后 */
+      orRule(mode, [V.cornerGlow, V.sheen], DECO, DECO_STRUCT.concat([
+        'background-image: var(--nts-panel-sheen-bg, none),'
+        + ' var(--nts-panel-corner-bg, none), ' + HOST_AFTER_BG + ' !important;',
         'background-repeat: no-repeat !important;'
       ]));
 
-      /* ========== ⑥ 边缘亮度内侧渐变 ========== */
-      orRule(mode, [V.edgeGradient], anchor + '::after', AFTER_STRUCT.concat([
+      /* ⑥ 边缘亮度内侧渐变 */
+      orRule(mode, [V.edgeGradient], DECO, DECO_STRUCT.concat([
         '--nts-panel-edge-shadow: ' + EDGE_SHADOW + ' !important;'
       ]));
 
-      /* ========== ⑦ 轻微内阴影 ========== */
-      orRule(mode, [V.innerGlow], anchor + '::after', AFTER_STRUCT.concat([
+      /* ⑦ 轻微内阴影 */
+      orRule(mode, [V.innerGlow], DECO, DECO_STRUCT.concat([
         '--nts-panel-inner-shadow: ' + INNER_SHADOW + ' !important;'
       ]));
 
-      /* ⑥+⑦ 合成 box-shadow */
-      var SHADOW_FALLBACK = 'var(--nts-panel-inner-shadow, 0 0 0 0 transparent),'
-        + ' var(--nts-panel-edge-shadow, 0 0 0 0 transparent)';
-      orRule(mode, [V.edgeGradient, V.innerGlow], anchor + '::after', AFTER_STRUCT.concat([
-        'box-shadow: ' + SHADOW_FALLBACK + ' !important;'
+      /* ⑥+⑦ 合成 box-shadow：内阴影/边缘光在上，宿主原生 inset 高光在最后 */
+      orRule(mode, [V.edgeGradient, V.innerGlow], DECO, DECO_STRUCT.concat([
+        'box-shadow: var(--nts-panel-inner-shadow, 0 0 0 0 transparent),'
+        + ' var(--nts-panel-edge-shadow, 0 0 0 0 transparent), '
+        + HOST_AFTER_INSETS + ' !important;'
       ]));
 
-      /* ========== ⑧ 半透明玻璃底色（scroll）========== */
-      orRule(mode, [V.glassTint], frost, [
+      /* ⑧ 玻璃底色：挂面板表面层 ::before 的 background-color */
+      orRule(mode, [V.glassTint], FROST, [
         'background-color: var(' + V.glassTint + ') !important;'
       ]);
 
-      /* ========== ⑨ 磨砂层（scroll::before + z-index:-1）========== */
-      orRule(mode, [V.glassBlur], frost + '::before', [
-        'content: "" !important;',
-        'position: absolute !important;',
-        'inset: 0 !important;',
-        'z-index: -1 !important;',
-        'pointer-events: none !important;',
-        'border-radius: inherit !important;',
+      /* ⑨ 磨砂：挂面板表面层 ::before 的 backdrop-filter */
+      orRule(mode, [V.glassBlur], FROST, [
         'backdrop-filter: var(' + V.glassBlur + ') !important;',
         '-webkit-backdrop-filter: var(' + V.glassBlur + ') !important;'
       ]);
     });
 
+    if (reducedMotion.length) {
+      out.push('@media (prefers-reduced-motion: reduce) {');
+      out.push('  ' + reducedMotion.join(',\n  ') + ' { animation: none !important; }');
+      out.push('}');
+    }
     out.push('');
   })();
 

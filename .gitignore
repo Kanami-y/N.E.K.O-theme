@@ -1,17 +1,53 @@
+# 构建 / 运行产物（中间产物不进 git）
+build/*.tmp
+build/*.tmp.*
+build/*.log
+build/*.diff
+build/*.json
+dist/*.tmp
+*.tmp
+*.log
+# 手工补丁的临时备份（曾有两个 .bak 被 install 同步进部署目录，
+# 还会被 48916 的静态路由暴露成可下载文件 —— 用 git 历史做备份，不要留现场）
+*.bak
+*.orig
+*.swp
+
 # Python
 __pycache__/
-*.py[cod]
-.pytest_cache/
-store.db
+*.pyc
+*.pyo
+
+# 施工 / 审阅工作目录
+_work/
+_review/
+
+# 本机状态与备份（机器相关，不要提交）
+backup/
+_nts-backup/
+.neko-plugin-installations/
+theme-studio-disabled
+
+# 前端自测导出的中间产物（test/*-selftest.js 生成）
+test/glass_css_dump.css
+
+# 运行期诊断（加载器经 loader_report 回写，机器相关）
+plugin/static/diagnostics.json
+
+# 运行期状态镜像（加载器据此判断用户是否已卸载，机器相关）
+plugin/static/disabled.json
+
+# 依赖
+node_modules/
 
 # 编辑器 / 系统
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-.idea/
+.vs/
+.vscode/
+*.user
 Thumbs.db
-desktop.ini
+.DS_Store
 
-# 安装期生成物：pristine 备份与调试草稿不入库
-/backup/
-/_work/
+# dist 产物可提交：显式取消忽略
+!dist/neko-theme-studio-*.zip
+!dist/neko-theme-studio-*.sha256
+!dist/MANIFEST.json

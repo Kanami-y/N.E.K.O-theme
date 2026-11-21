@@ -19,6 +19,12 @@
 (function () {
   'use strict';
 
+  // 重复注入哨兵（v1.5.23）：模板补丁与 self-upgrade 换表都可能让本脚本在同一页面
+  // 执行第二次。没有这道闸门时会出现两份轮询定时器、两套 pointer/scroll 监听，
+  // 变量被重复写入同一 <style>（闪烁 + 白烧 CPU），而且两边状态互不知情。
+  if (window.__NTS_LOADER_LOADED__) return;
+  window.__NTS_LOADER_LOADED__ = true;
+
   // ---------------------------------------------------------------- 配置常量
 
   var PLUGIN_ID = 'neko_theme_studio';
@@ -29,13 +35,22 @@
   var BASE_OVERRIDE_KEY = 'neko.themeStudio.baseUrl';
   var DEFAULT_PLUGIN_BASE = 'http://127.0.0.1:48916';
   var POLL_INTERVAL_MS = 1500;
+  // 调色板请求超时（v0.1.11 P0）。原生 fetch 没有超时：端点假死（TCP 连上但不回
+  // 响应）时 Promise 永远 pending，fetchPalette 的 inflight 就永远是 true，
+  // 1.5s 的轮询被永久卡死 —— 症状是「面板改了色，窗口再也不更新，控制台全静默」。
+  // 超时算一次网络失败，走自愈退避（见 reviveService）。
+  var FETCH_TIMEOUT_MS = 8000;
   // 应用冷启动时插件生命周期可能还没起来（用户插件总开关是关的，或 registry
   // 尚未扫描），此时 /plugin/<id>/ui/theme.json 直接 404，主题就「永远不生效」。
   // 本加载器运行在应用窗口里，可以用带 Origin 的 CSRF 请求把插件服务叫醒：
   //   GET  /security/csrf-token  →  POST /plugins/refresh  →  POST /plugin/<id>/start
   // 三者都已实测可跨源调用（预检回显 allow-origin/allow-headers），因此无需
   // 依赖任何宿主开关。次数限流，避免 1.5s 轮询把服务打爆。
-  var REVIVE_MIN_INTERVAL_MS = 12000;
+  // v0.1.11：固定 12s 节流改成指数退避（1.2s 起、每次 ×2、上限 30s）。
+  // 固定 12s 在插件冷启动时太慢（用户以为改了没生效），而服务长时间不可用时
+  // 又没必要每 12s 就打 csrf-token + refresh + start 三条请求。退避两头都照顾。
+  var REVIVE_BASE_DELAY_MS = 1200;
+  var REVIVE_MAX_DELAY_MS = 30000;
   var REVIVE_MAX_ATTEMPTS = 40;
   // 自升级：已开窗口里的脚本无法被替换（浏览器已执行完），当磁盘上的加载器比
   // 本实例新时，唯一的接管办法是重新加载本页面。这是「面板新增了一个变量，用户
@@ -60,29 +75,69 @@
   //        加载器时自行刷新页面 —— 修复「新加变量在已开窗口里被静默丢弃」。
   // 1.5.0: theme.json 不再有 version 计数（改用 updated_at 标记 + 原始 JSON 逐字比较）；
   //        新增 image 类型（--nts-chat-bg-image，聊天背景图）。
-  var SCRIPT_VERSION = '1.5.10';
+  // 1.5.13: 液态玻璃静态层（契约 _work/FEATURE-CONTRACT-0.2.0.md §2）：rim 边缘反射光、
+  //        sheen 掠光、noise 雾面颗粒，三个变量门控、非玻璃主题零效果；新增
+  //        --nts-glass-rim / --nts-glass-sheen / --nts-glass-noise 的 kind 登记。
+  // 1.5.14: Apple Liquid Glass 材质层（契约 _work/FEATURE-CONTRACT-0.3.0.md）：
+  //        lens 透镜亮环 / thickness 厚度 / specular 指针镜面，滚动收敛与按压形变。
+  // 1.5.15: 光效引擎（契约 _work/FEATURE-CONTRACT-0.4.0.md）：ambient 指针光源、
+  //        glass-dispersion 边缘分光、glass-caustic 流动焦散；修掉 0.3.0 里
+  //        「黑色遮罩盖死镜面/掠光」与「sheen 动画无条件空转」两个缺陷；窗口
+  //        不可见时暂停动画；指针同时写 --nts-light-x/y 供 ambient 使用。
+  // 1.5.16: 修复 0.4.0 的回归 —— 光效层曾挂在 `.compact-export-history-scroll` 上，
+  //        而该表面是 position:static（刻意不加 relative，避免改掉 ::before 磨砂层
+  //        的锚点），absolute + inset:0 的 ::after 于是铺到更外层的定位祖先上，
+  //        表现为历史/导出面板上方多出一整块直角的亮屏。现在只对有确定包含块的
+  //        6 个表面做光效层。
+  // 1.5.17: 0.4.2 修复「每个主题都有一层直角光屏」——根因是光效层/面板装饰层的
+  //        absolute 伪元素挂在 position:static 的宿主上（.composer-input-shell、
+  //        .message-bubble-*、.compact-export-history-scroll），一路逃到
+  //        position:fixed 的 .compact-export-history-anchor 大盒子上铺满。现在
+  //        ensureGlassContainment() 只对计算值为 static 的宿主补 inline relative；
+  //        面板装饰层本身改挂 scroll::after（z-index:-1、圆角 inherit、内发光）。
+  // 1.5.18: 0.4.3 结构性修正「面板下面又多了」——根因是历史消息浮层
+  //        `.compact-export-history-scroll` 根本不是面板：无圆角、无背景、高度按
+  //        `--compact-export-history-region-height` 预留槽位定死，消息少时比气泡
+  //        实际占位更高。0.4.2 把面板级装饰改挂在它的 ::after 上，于是装饰跟着
+  //        铺到气泡下方那块空槽里。现在面板级光效全部改挂紧凑态真实面板
+  //        `.compact-chat-surface-frame::after`（999px 圆角 + overflow:hidden，
+  //        装饰天然被裁进胶囊），磨砂/底色挂它的 ::before；历史浮层只保留气泡级
+  //        装饰。同步移除 scroll 上的 rim box-shadow 与包含块补丁。
+  // 1.5.19: 0.4.8 修「鼠标移动过去不一定有光效动态改变」。四个原因：
+  //        ① 旧版只在 pointermove 时重绘，指针不动而页面在滚（含嵌套滚动容器）/
+  //        窗口 resize / 新消息插入时，高光停在旧坐标 —— 现在滚动走捕获阶段、
+  //        resize 与 DOM 重建后都会重绘；② MutationObserver 旧版是 350ms 防抖，
+  //        聊天流式输出时计时器被无限重置 → 表面列表永不刷新（新气泡没有光效），
+  //        改为 220ms 节流；③ 新插入的表面旧版要等下一次指针移动才拿到坐标，
+  //        现在重建后立刻补一次；④ 旧版 0.1% 字符串比较 + 瞬时跳变，小范围移动
+  //        被吃掉、观感生硬 —— 改为逐帧向目标插值 22%（收敛 0.06% 后停帧）。
+  //        pointermove/pointerdown/pointerover 全部用捕获阶段，组件 stopPropagation
+  //        也不会把指针事件吞掉。
+  var SCRIPT_VERSION = '1.6.39';
 
   // 允许的颜色值形态。刻意保守：只放行纯颜色，杜绝把任意 CSS 注进变量。
   var RE_HEX = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
   var RE_RGB = /^rgba?\(\s*[0-9]{1,3}\s*,\s*[0-9]{1,3}\s*,\s*[0-9]{1,3}\s*(,\s*(0|1|0?\.[0-9]+)\s*)?\)$/i;
   var RE_HSL = /^hsla?\(\s*-?[0-9]{1,3}(\.[0-9]+)?\s*,\s*[0-9]{1,3}(\.[0-9]+)?%\s*,\s*[0-9]{1,3}(\.[0-9]+)?%\s*(,\s*(0|1|0?\.[0-9]+)\s*)?\)$/i;
-  // CSS 命名颜色（含 currentcolor）。不收 inherit/initial/unset/revert：
+  // CSS 命名颜色（含 transparent 与 currentcolor）。不收 inherit/initial/unset/revert：
   // 那四个会把颜色继承成父级，正文色被带偏就是「串色」投诉的来源。
-  var COLOR_NAMES = ('aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue' +
-    'blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson' +
-    'currentcolor cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta' +
-    'darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise' +
-    'darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia' +
-    'gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink' +
-    'indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral' +
-    'lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray' +
-    'lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue' +
-    'mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose' +
-    'moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod' +
-    'palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple' +
-    'rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna' +
-    'silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal' +
-    'thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen').split(' ');
+  // transparent 必须显式列出：后端 RE_KEYWORD_COLOR 一直收它，但本表漏了，
+  // 于是「把背景设成透明」在面板上显示成功、门控却不生成 —— 声明永远不匹配。
+  var COLOR_NAMES = ('transparent aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue' +
+    ' blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson' +
+    ' currentcolor cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta' +
+    ' darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise' +
+    ' darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia' +
+    ' gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink' +
+    ' indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral' +
+    ' lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray' +
+    ' lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue' +
+    ' mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose' +
+    ' moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod' +
+    ' palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple' +
+    ' rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna' +
+    ' silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal' +
+    ' thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen').split(' ');
   var NAMED_COLOR = Object.create(null);
   for (var ci = 0; ci < COLOR_NAMES.length; ci += 1) { NAMED_COLOR[COLOR_NAMES[ci]] = 1; }
   function isNamedColor(t) { return NAMED_COLOR[String(t).toLowerCase()] === 1; }
@@ -102,6 +157,8 @@
   // 允许 1.0 / 1.00 这类零填充写法（用户最自然地把「100%」写成 1.0）；
   // 仍拒绝 1.5 / 2 / -0.3 这类超出 0-1 的值。
   var RE_NUMBER = /^(?:0|1|0?\.[0-9]+|1\.0+)$/;
+  // 行高：无单位倍数 0.8–3.0（最多两位小数）。与后端 RE_RATIO 逐字相同。
+  var RE_RATIO = /^[0-9](?:\.[0-9]{1,2})?$/;
   // 时间值（v0.1.11，呼吸节奏）：3s / 1.5s / 800ms，裸数字按秒（3 = 3s）。
   // 上限 60s —— 再长的循环用户看不出"在动"，也没有实际意义。
   var RE_TIME = /^(?:(?:0|[1-9][0-9]{0,3})(?:\.[0-9]{1,3})?(?:s|ms))$/i;
@@ -173,6 +230,12 @@
     '--nts-bubble-veil': 'number',
     // 背景图亮度：0-1 乘子，1 = 原图，0 = 全黑。值种类 number，走同一个分支。
     '--nts-chat-bg-image-brightness': 'number',
+    // 背景图适应方式：cover（铺满，可能裁切）/ contain（整图可见，两侧留底色）。
+    // 值种类 keyword —— 只收这两个关键字，别的一律丢弃（不会回退成奇怪尺寸）。
+    '--nts-chat-bg-fit': 'keyword',
+    // 圆角几何形状：round（普通圆角）/ continuous（连续曲率 = 超椭圆）。
+    // 同样是 keyword 型 —— 值域写死在 KEYWORD_VALUES 里，别的一律丢弃。
+    '--nts-corner-style': 'keyword',
     // 背景图顶上那层「雾」= 应用给历史列表容器加的 mask-image 顶部渐隐。
     // 1 = 与应用原生一致，0 = 渐隐完全取消。与上一个同走 number 分支。
     '--nts-chat-top-fade': 'number',
@@ -194,7 +257,44 @@
     '--nts-panel-glass-tint': 'color',
     '--nts-panel-glass-blur': 'blur',
     '--nts-panel-sheen': 'number',
-    '--nts-panel-inner-glow': 'number'
+    '--nts-panel-inner-glow': 'number',
+    // ===== 液态玻璃 / 自定义渐变（v0.1.11，契约 _work/FEATURE-CONTRACT-0.1.11.md §1）=====
+    // 三端（Python _value_kind / 面板 isSafeValue / 本表）必须同 kind：任一端不认识
+    // 新变量，就会出现「面板能存、加载器静默丢值、用户看到改了没反应」。
+    // 这里的 map 名字虽然叫 NON_COLOR_VARS，但 color 也显式登记：'auto' 兜底会
+    // 额外放行长度值（见 isSafeValue），比后端的 color 判定宽松，登记后才逐字一致。
+    '--nts-glass-filter': 'filter',
+    '--nts-glass-tint': 'color',
+    '--nts-glass-highlight': 'color',
+    // 液态玻璃静态层（v1.5.13，契约 0.2.0 §1）：rim 是颜色，sheen/noise 是 0~1 强度。
+    // sheen/noise 走 number kind（允许面板/JSON 用 "55%" 写法，sanitizeVars 归一成 0.55）。
+    // 三端（Python _value_kind / 面板 isSafeValue / 本表）必须同 kind，否则又会出现
+    // 「面板能存、加载器静默丢值、用户看到改了没反应」。
+    '--nts-glass-rim': 'color',
+    '--nts-glass-sheen': 'number',
+    '--nts-glass-noise': 'number',
+    // 液态玻璃材质（v1.5.14，契约 0.3.0 §1）：lens/thickness/specular 都是 0~1 连续量。
+    // 同样是 number kind（面板/JSON 可写 "70%" 或 0.7，sanitizeVars 归一到 0–1）。
+    '--nts-glass-lens': 'number',
+    // v0.12.0：背景图位置 / 平铺是关键字型；行高是无单位倍数（ratio）。
+    '--nts-chat-bg-position': 'keyword',
+    '--nts-chat-bg-repeat': 'keyword',
+    '--nts-line-height': 'ratio',
+    '--nts-glass-thickness': 'number',
+    '--nts-glass-specular': 'number',
+    // 光效引擎（v1.5.15，契约 0.4.0 §1）：指针光源 / 边缘分光 / 流动焦散，都是 0~1。
+    // 未配置（absent）== 零效果；配置了非法值 == 整条丢弃并 warn 一次（noteRejected）。
+    '--nts-ambient-glow': 'number',
+    '--nts-glass-dispersion': 'number',
+    '--nts-glass-caustic': 'number',
+    '--nts-bubble-glass-filter': 'filter',
+    '--nts-bubble-glass-tint': 'color',
+    '--nts-chat-gradient': 'gradient',
+    // v0.13.0：文字渐变，与背景渐变同一套 linear/radial 校验。
+    '--nts-text-gradient': 'gradient',
+    '--nts-panel-gradient': 'gradient',
+    '--nts-user-bubble-gradient': 'gradient',
+    '--nts-ai-bubble-gradient': 'gradient'
   };
 
   // 明确拒绝的危险片段。
@@ -219,6 +319,90 @@
     if (!p || typeof p !== 'object') return '';
     return String(p.updated_at || p.name || '');
   }
+  /* ===== IMAGE_WARM_BEGIN ===== */
+  // ------------------------------------------------- 背景图预热（v1.5.21）
+  //
+  // 切换主题时背景图 URL 变了，浏览器要先下载 / 解码新图；CSS 变量一改，旧图
+  // 立刻失效、新图还没到，聊天区就会闪一下空白底色 —— 图越大越明显，第一次
+  // 加载某个主题时最容易看见。
+  //
+  // 所以「检测到主题真的换了」时先把新图预热，等它们就绪（或超时 1.5s）再改
+  // CSS。首次应用也走这条路：冷启动时缓存里若是带图的主题，同样不该闪。
+  // 只预热本插件自己的 backgrounds/ 目录（受 RE_BG_VALUE 约束），不碰任何外链。
+  var IMAGE_WARM_TIMEOUT_MS = 1500;
+  var warmedImages = Object.create(null);   // url -> 'ok' | 'fail'
+  var warmWaiters = Object.create(null);    // url -> [fn]
+  var lastWarmKey = null;   // 上一次「已经决定直接应用」的调色板签名
+  var warmingKey = null;    // 正在预热中的签名
+  var warmPending = null;   // 预热完成后要应用的调色板
+  var warmSeq = 0;          // 预热票号：只有最新一次预热允许回调应用
+
+  /** 取调色板里所有背景图 URL（亮 / 暗两组去重，只认本插件 backgrounds/）。 */
+  function imageUrlsOf(p) {
+    var out = [];
+    var seen = Object.create(null);
+    var maps = [p && p.vars, p && p.dark_vars];
+    for (var i = 0; i < maps.length; i += 1) {
+      var src = maps[i];
+      if (!src || typeof src !== 'object') continue;
+      for (var k in src) {
+        if (!Object.prototype.hasOwnProperty.call(src, k)) continue;
+        var v = src[k];
+        if (typeof v !== 'string' || !v || v === 'none') continue;
+        if (!RE_BG_VALUE.test(v)) continue;
+        var hit = /url\(\s*"?([^")\s]+)"?\s*\)/i.exec(v);
+        if (!hit) continue;
+        if (seen[hit[1]]) continue;
+        seen[hit[1]] = 1;
+        out.push(hit[1]);
+      }
+    }
+    return out;
+  }
+
+  function markImageWarmed(url, status) {
+    warmedImages[url] = status;
+    var list = warmWaiters[url];
+    if (!list) return;
+    delete warmWaiters[url];
+    for (var i = 0; i < list.length; i += 1) {
+      try { list[i](); } catch (e) { /* ignore */ }
+    }
+  }
+
+  /**
+   * 预热若干图片：全部就绪（成功或失败）或超时后回调一次，且只回调一次。
+   * 已经预热过的 URL 直接跳过，不会重复发请求。
+   */
+  function warmImages(urls, done) {
+    var pending = 0;
+    var fired = false;
+    var timer = 0;
+    function finish() {
+      if (fired) return;
+      fired = true;
+      if (timer) { clearTimeout(timer); timer = 0; }
+      try { done(); } catch (e) { /* ignore */ }
+    }
+    for (var i = 0; i < urls.length; i += 1) {
+      if (warmedImages[urls[i]]) continue;
+      pending += 1;
+      (function (url) {
+        var img = new Image();
+        function settle(status) {
+          markImageWarmed(url, status);
+          pending -= 1;
+          if (!pending) finish();
+        }
+        img.onload = function () { settle('ok'); };
+        img.onerror = function () { settle('fail'); };
+        try { img.src = url; } catch (e) { settle('fail'); }
+      }(urls[i]));
+    }
+    if (!pending) { finish(); return; }
+    timer = setTimeout(finish, IMAGE_WARM_TIMEOUT_MS);
+  }
+  /* ===== IMAGE_WARM_END ===== */
 
   function log() {
     if (!DEBUG) return;
@@ -264,6 +448,14 @@
    * @param {string} value 候选值
    * @returns {boolean}
    */
+  /** keyword 型变量的值域（与后端 KEYWORD_VARS 一一对应，改一处必须改三处）。 */
+  var KEYWORD_VALUES = {
+    '--nts-chat-bg-fit': ['cover', 'contain'],
+    '--nts-corner-style': ['round', 'continuous'],
+    '--nts-chat-bg-position': ['center', 'top', 'bottom', 'left', 'right'],
+    '--nts-chat-bg-repeat': ['no-repeat', 'repeat', 'repeat-x', 'repeat-y']
+  };
+
   function isSafeValue(name, value) {
     if (typeof value !== 'string') return false;
     var v = value.trim();
@@ -275,6 +467,18 @@
       return RE_BG_VALUE.test(v);
     }
     if (RE_BAD.test(v)) return false;
+
+    // v0.1.11：两类新值（契约 §2）。都按 token / 停止点白名单整串锚定，
+    // 因此 `url(...)`、`var(...)`、`expression(...)` 与任何多余内容都会被拒。
+    if (kind === 'keyword') return (KEYWORD_VALUES[name] || []).indexOf(v.toLowerCase()) >= 0;
+    // 行高是「无单位倍数」，与 0–1 的 number 乘子不同，不能共用 RE_NUMBER。
+    if (kind === 'ratio') {
+      if (!RE_RATIO.test(v)) return false;
+      var ratio = parseFloat(v);
+      return ratio >= 0.8 && ratio <= 3;
+    }
+    if (kind === 'filter') return isSafeFilterChain(v);
+    if (kind === 'gradient') return isSafeGradient(v);
 
     if (kind === 'color' || kind === 'auto') {
       // 'auto' 是给「本版本之后新增、白名单里还没记录」的变量兜底。
@@ -352,6 +556,87 @@
     return false;
   }
 
+  // --------------------------------------------- 新值类型校验：filter / gradient
+  //
+  // v0.1.11 新增两类值（契约 §2，Python _filter_chain_ok/_gradient_ok、面板
+  // isSafeFilterChain/isSafeGradient 与这里必须逐字同判定）：
+  //   filter   = 空格分隔的滤镜链，1–4 个 token 且不可重复，blur ≤ 40px、其它 ≤ 400%
+  //   gradient = linear/radial-gradient，2–4 个停止点，整串 ≤ 300 字符
+  // 这两类值会原样拼进 `--nts-*: <值>` 声明，所以必须整串锚定 / 按 token 白名单，
+  // 不能用「看起来像滤镜」的宽松正则（那等于给主题 JSON 开了一条注入通道）。
+  var RE_FILTER_TOKEN = /^(blur|saturate|brightness|contrast|grayscale)\((\d{1,3}(?:\.\d+)?)(px|%)\)$/;
+  var FILTER_MAX_TOKENS = 4;
+  var FILTER_MAX_CHARS = 120;
+  var FILTER_MAX_BLUR_PX = 40;
+  var FILTER_MAX_PERCENT = 400;
+
+  /**
+   * 滤镜链校验（契约 §2.1）。
+   * @param {string} v 例如 `blur(20px) saturate(150%)`
+   * @returns {boolean}
+   */
+  function isSafeFilterChain(v) {
+    if (typeof v !== 'string') return false;
+    var s = v.trim();
+    if (!s || s.length > FILTER_MAX_CHARS) return false;
+    var toks = s.split(' ');
+    if (toks.length < 1 || toks.length > FILTER_MAX_TOKENS) return false;
+    var seen = Object.create(null);
+    for (var i = 0; i < toks.length; i += 1) {
+      var m = RE_FILTER_TOKEN.exec(toks[i]);
+      if (!m) return false;
+      var fn = m[1], num = parseFloat(m[2]), unit = m[3];
+      if (seen[fn]) return false;
+      seen[fn] = 1;
+      if (fn === 'blur') { if (unit !== 'px' || num > FILTER_MAX_BLUR_PX) return false; }
+      else { if (unit !== '%' || num > FILTER_MAX_PERCENT) return false; }
+      if (toks[i] !== m[0]) return false;
+    }
+    return true;
+  }
+
+  var RE_GRAD_HEAD = /^(linear|radial)-gradient\(([\s\S]*)\)$/;
+  var RE_GRAD_ANGLE = /^-?\d{1,3}(?:\.\d+)?deg$/;
+  var RE_GRAD_STOP = /^((?:#[0-9a-f]{3,8})|(?:rgba?\([^()]*\))|(?:hsla?\([^()]*\))|(?:[a-z]{3,20}))(?:\s+(\d{1,3}(?:\.\d+)?)%)?$/i;
+  var GRADIENT_MAX_STOPS = 4;
+  var GRADIENT_MAX_CHARS = 300;
+
+  /**
+   * 渐变校验（契约 §2.2）：只认 linear / radial，2–4 个停止点，停止点百分比 ≤ 100%。
+   * 顶层逗号切分要数括号深度 —— rgba(0, 0, 0, .5) 里全是逗号。
+   * @param {string} v 例如 `linear-gradient(135deg, #eef4ff 0%, #dfe9ff 100%)`
+   * @returns {boolean}
+   */
+  function isSafeGradient(v) {
+    if (typeof v !== 'string') return false;
+    var s = v.trim();
+    if (!s || s.length > GRADIENT_MAX_CHARS) return false;
+    var m = RE_GRAD_HEAD.exec(s);
+    if (!m) return false;
+    var body = m[2], depth = 0, parts = [], buf = '';
+    for (var i = 0; i < body.length; i += 1) {
+      var ch = body[i];
+      if (ch === '(') depth += 1; else if (ch === ')') { depth -= 1; if (depth < 0) return false; }
+      if (ch === ',' && depth === 0) { parts.push(buf.trim()); buf = ''; continue; }
+      buf += ch;
+    }
+    parts.push(buf.trim());
+    if (depth !== 0) return false;
+    if (m[1] === 'linear') {
+      if (parts.length < 3 || !RE_GRAD_ANGLE.test(parts[0])) return false;
+      parts = parts.slice(1);
+    }
+    if (parts.length < 2 || parts.length > GRADIENT_MAX_STOPS) return false;
+    for (var j = 0; j < parts.length; j += 1) {
+      var sm = RE_GRAD_STOP.exec(parts[j]);
+      if (!sm) return false;
+      var color = sm[1];
+      if (!(isNamedColor(color) || RE_HEX.test(color) || RE_RGB.test(color) || RE_HSL.test(color))) return false;
+      if (sm[2] !== undefined && parseFloat(sm[2]) > 100) return false;
+    }
+    return true;
+  }
+
   /** 按「顶层逗号」切多层 box-shadow（后端 _split_shadow_layers 同构）。 */
   function shadowLayers(value) {
     var layers = [];
@@ -408,6 +693,25 @@
   }
 
   /**
+   * 被拒变量只大声报一次（DEBUG 日志全量）。
+   * v0.1.11 起错误信息必须带变量名 —— 用户看不到面板的校验镜像时，控制台里
+   * 「哪个变量、什么值、按什么 kind 判的」是唯一能自查的线索；不带名字的
+   * 「reject value」等于没说。
+   */
+  var warnedReject = Object.create(null);
+  function noteRejected(name, value) {
+    log('reject value', name, value);
+    if (warnedReject[name]) return;
+    warnedReject[name] = 1;
+    try {
+      var kind = NON_COLOR_VARS[name] || 'color';
+      console.warn('[theme-studio] 变量 ' + name + ' 的值不合法（kind=' + kind + '），已跳过：' +
+        String(value).slice(0, 120) +
+        '\n  合法形态见 FEATURE-CONTRACT §2；改对后下一轮轮询会自动生效。');
+    } catch (e) { /* ignore */ }
+  }
+
+  /**
    * 过滤出一个安全的 vars 对象。
    * @returns {Object<string,string>}
    */
@@ -417,7 +721,7 @@
     for (var k in src) {
       if (!Object.prototype.hasOwnProperty.call(src, k)) continue;
       if (!isSafeVarName(k)) { log('reject var name', k); continue; }
-      if (!isSafeValue(k, src[k])) { log('reject value', k, src[k]); continue; }
+      if (!isSafeValue(k, src[k])) { noteRejected(k, src[k]); continue; }
       var v = String(src[k]).trim();
       // 与插件端 normalize_value() 对齐：裸长度补成 blur(...)，否则
       // `backdrop-filter: 18px` 整条声明非法而被浏览器丢弃。
@@ -437,9 +741,20 @@
 
   // ---------------------------------------------------------------- 注入
 
+  // v0.1.11 重复注入哨兵：注入 <style> 前先按固定 id 复用。宿主（或用户手工）
+  // 重复注入本脚本时，第二份实例会命中同一个 id，不会再插一份；同一个 id 下若
+  // 已有多份节点（模板重渲染 / 多次 append），只保留第一份，避免「谁最后写谁生效」。
+  var lastAppliedCss = '';
   function styleEl() {
     var el = document.getElementById(STYLE_ID);
-    if (el) return el;
+    if (el) {
+      if (el.tagName && String(el.tagName).toUpperCase() === 'STYLE') {
+        removeDuplicateStyles(el);
+        return el;
+      }
+      // 同一个 id 被非 <style> 节点占用：让它让位，自己重建一份。
+      if (el.parentNode) el.parentNode.removeChild(el);
+    }
     el = document.createElement('style');
     el.id = STYLE_ID;
     el.setAttribute('data-nts', '1');
@@ -447,10 +762,53 @@
     return el;
   }
 
+  /** 清掉与 keep 同 id 的多余 <style> 节点。 */
+  function removeDuplicateStyles(keep) {
+    try {
+      var all = document.querySelectorAll('style#' + STYLE_ID);
+      for (var i = 0; i < all.length; i += 1) {
+        var n = all[i];
+        if (n === keep) continue;
+        if (n.parentNode) n.parentNode.removeChild(n);
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  /** 注入的 <style> 是否还在 DOM 里、内容是否就是最近一次写入的内容。 */
+  function styleIntact() {
+    if (!lastAppliedCss) return true;
+    var el = document.getElementById(STYLE_ID);
+    return !!(el && el.parentNode && el.textContent === lastAppliedCss);
+  }
+
+  // v0.1.11 CSP 自检：style-src 被 CSP 拦掉时，<style> 节点照样能插进 DOM，但规则
+  // 一条都不生效 —— 变量注入"成功"、外观纹丝不动，且没有任何报错（最容易被误判成
+  // 「插件没生效」）。往注入内容里写一条探针自定义属性，用 getComputedStyle 验证它
+  // 是否真的被解析；不生效时只 warn 一次，不 throw、不重试（CSP 不会自己变好）。
+  var PROBE_CSS = ':root{--nts-probe:1}';
+  var cspWarned = false;
+  function probeStyleApplied() {
+    if (cspWarned) return;
+    var got = '';
+    try {
+      if (!window.getComputedStyle) return;
+      got = window.getComputedStyle(document.documentElement).getPropertyValue('--nts-probe');
+    } catch (e) { return; }
+    if (String(got).trim() === '1') return;
+    cspWarned = true;
+    try {
+      console.warn('[NTS] 主题样式被 CSP 拦截，主题不会生效');
+    } catch (e2) { /* ignore */ }
+  }
+
   function removeStyle() {
     var el = document.getElementById(STYLE_ID);
     if (el && el.parentNode) el.parentNode.removeChild(el);
+    lastAppliedCss = '';
     clearGates();
+    // v1.6.0：材质层靠 data-nts-mt 门控，撤样式时必须一起撤属性，
+    // 否则 MATERIAL_CSS 仍匹配、只是变量缺失 —— 会退化成"半透明底"视觉残留。
+    clearMaterialAttrs();
   }
 
   // ------------------------------------------------------- 门控属性（gates）
@@ -489,9 +847,15 @@
     } else {
       // 没有记账时兜底扫描，避免残留陈旧门控（属性变化会触发样式重算）
       var names = [];
+      /* 只清「变量门控」：`data-nts-l-<变量>` / `data-nts-d-<变量>`。
+       * 旧实现用裸前缀 `data-nts-` 兜底，会把 loader 自己的状态属性一起删掉
+       * （data-nts-active 有变量被配置 / data-nts-paused 后台暂停 /
+       * data-nts-fade 主题切换渐入）—— 表现为换主题时渐变被掐断、切回前台
+       * 玻璃动画不动。 */
+      var gatePrefixes = [GATE_ATTR + 'l-', GATE_ATTR + 'd-'];
       for (var j = 0; j < de.attributes.length; j++) {
         var n = de.attributes[j].name;
-        if (n.indexOf(GATE_ATTR) === 0) names.push(n);
+        if (n.indexOf(gatePrefixes[0]) === 0 || n.indexOf(gatePrefixes[1]) === 0) names.push(n);
       }
       for (var k = 0; k < names.length; k++) de.removeAttribute(names[k]);
     }
@@ -507,6 +871,7 @@
   function setGates(light, dark) {
     var de = document.documentElement;
     if (!de) return;
+    syncCornerStyle(light, dark);
     var want = [];
     var seen = {};
     function add(o, mode) {
@@ -538,6 +903,950 @@
     clearGates();
     for (var m = 0; m < want.length; m++) de.setAttribute(want[m], '1');
     gateApplied = want;
+  }
+
+  /** 连续曲率圆角的开关属性：只在调色板里出现 continuous 时打上。
+   *  CSS 侧（gen-css 的 @supports 段）靠 `[data-nts-squircle]` 门控，内核不支持
+   *  `corner-shape` 时整段不生效 —— 所以这里可以无条件按值打属性。 */
+  var SQUIRCLE_ATTR = 'data-nts-squircle';
+
+  function syncCornerStyle(light, dark) {
+    var de = document.documentElement;
+    if (!de) return;
+    var on = false;
+    var groups = [light, dark];
+    for (var i = 0; i < groups.length && !on; i += 1) {
+      var g = groups[i];
+      if (!g || typeof g !== 'object') continue;
+      var raw = g['--nts-corner-style'];
+      if (typeof raw === 'string' && raw.trim().toLowerCase() === 'continuous') on = true;
+    }
+    if (on) {
+      if (!de.hasAttribute(SQUIRCLE_ATTR)) de.setAttribute(SQUIRCLE_ATTR, '1');
+    } else if (de.hasAttribute(SQUIRCLE_ATTR)) {
+      de.removeAttribute(SQUIRCLE_ATTR);
+    }
+  }
+
+  // -------------------- 液态玻璃材质层（v1.5.14，契约 0.3.0）
+  //
+  // 目标：把 Apple Liquid Glass 的**感知要素**用 CSS 复刻到宿主的功能层上
+  // （顶栏 / 输入框 / 气泡 / 弹层 / 导出区），而不是往页面上堆装饰。
+  // Apple 官方把它描述成「半透明材质，会折射、反射周围内容并随上下文流动」，
+  // 拆开是四层 + 一个动态维度；Chromium 不支持 backdrop-filter 引用 SVG filter，
+  // 所以真位移折射无法做（契约 §2 已论证），这里做感知等价：
+  //
+  //   1 透视  backdrop-filter：来自 --nts-glass-filter（生成 CSS 已写，本层不碰）
+  //   2 染色  background-color：来自 --nts-glass-tint（同上）
+  //   3 边缘  lens 亮环 + thickness 厚度（本层新增，box-shadow 组合）
+  //           上缘 1px 高光、下缘 1px 暗边、四边 1px 半亮；lens 再叠一圈亮环
+  //           与内侧柔光，模拟玻璃边把光「弯」进来的感觉
+  //   4 镜面  specular 径向高光（本层新增，伪元素），位置 --nts-spec-x/--nts-spec-y
+  //           由 initGlassPointer 跟随指针写入 —— 这是 Apple 玻璃最容易被认出来的
+  //           特征：高光随光源/指针移动，而不是固定扫光
+  //   1 动态  沿用 0.2.0 的 sheen 掠光 + noise 颗粒；滚动时 --nts-scroll-k=1
+  //           让镜面高光收敛（「液」随滚动流动）；按压轻微压扁（见第 11 组规则）
+  //
+  // 三条硬约束（沿用 0.2.0，契约 §1/§2/§6）：
+  //   1) 所有新变量在旧主题里都没配置 → 每条规则都门控在 data-nts-l/d-glass-* 上，
+  //      没配置 == 零效果（旧主题外观逐像素不变）。
+  //   2) 不写元素自身的 background-image（生成 CSS 已用 !important 占了），
+  //      只用伪元素与 box-shadow 做加法。
+  //   3) 宿主 .composer-input-shell / 消息气泡是 position:static，绝对定位伪元素
+  //      需要定位祖先 → 补 position:relative（无偏移量，不改布局）；不加 isolation。
+  //
+  // 伪元素槽位（审计 46 个宿主 CSS 文件，脚本 _work/glass_audit.py）：
+  //   ::before + ::after 都空闲 —— .composer-input-shell、.composer-overflow-popover、
+  //       .message-bubble-user、.message-bubble-assistant、.compact-export-history-bubble
+  //       → ::before 做 noise，::after 做 specular + sheen（两层背景，screen 混合）。
+  //   只剩 ::after 空闲 —— .window-topbar（::before 被暗色渐变占用）、
+  //       .compact-export-history-scroll（::before 被面板磨砂层占用）
+  //       → ::after 里叠 specular + sheen + noise 三层（screen / screen / overlay）。
+  //   ::before、::after 都被占用 —— .compact-chat-surface-frame、.composer-icon-button
+  //       → 只做 box-shadow 的 lens + thickness（无镜面伪元素）。
+  //
+  // 门控前缀补 :root:root:root:root，specificity 压过生成的 !important 规则。
+  // data URI 里 # 必须写成 %23 —— 裸 # 会让 CSS 在 url() 中间截断。
+  var GLASS_NOISE_URI = "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/></filter><rect width='120' height='120' filter='url(%23n)' opacity='0.6'/></svg>\")";
+
+  var GLASS_CSS = (function () {
+    var LIGHT = ':root:not([data-theme=dark])';
+    var DARK = ':root[data-theme=dark]';
+    // 与生成器一致：重复 :root 抬高 specificity，压住宿主运行时注入的 !important。
+    var BOOST = ':root:root:root:root';
+    var MODES = [
+      { pre: LIGHT, key: GATE_ATTR + 'l-' },
+      { pre: DARK, key: GATE_ATTR + 'd-' }
+    ];
+    var lines = [];
+
+    /** 生成「模式 × 门控变量 × 目标」的选择器列表。
+     *  vars 里任一变量在任一模式被配置过，规则就生效；变量各写一条，互不牵连。 */
+    function sel(targets, vars, pseudo) {
+      var out = [];
+      for (var t = 0; t < targets.length; t++) {
+        for (var m = 0; m < MODES.length; m++) {
+          for (var v = 0; v < vars.length; v++) {
+            out.push(MODES[m].pre + '[' + MODES[m].key + 'glass-' + vars[v] + ']' +
+              BOOST + ' body ' + targets[t] + (pseudo || ''));
+          }
+        }
+      }
+      return out;
+    }
+
+    function rule(sels, body) {
+      lines.push(sels.join(',\n') + ' {\n' + body.join('\n') + '\n}');
+    }
+
+    // 0–1 变量统一读法：未配置时按 0 算（= 零效果）。
+    var V_T = 'var(--nts-glass-thickness, 0)';
+    var V_L = 'var(--nts-glass-lens, 0)';
+    var V_S = 'var(--nts-glass-specular, 0)';
+    var V_D = 'var(--nts-glass-dispersion, 0)';
+    var V_A = 'var(--nts-ambient-glow, 0)';
+    var V_C = 'var(--nts-glass-caustic, 0)';
+    // 指针光源位置（initGlassPointer 写入，百分比）：ambient 光斑跟着指针走。
+    var LIGHT_AT = 'var(--nts-light-x, 50%) var(--nts-light-y, 0%)';
+    var V_K = 'var(--nts-scroll-k, 0)';
+    var RIM = 'var(--nts-glass-rim, rgba(255, 255, 255, 0.55))';
+
+    // 镜面高光位置：指针跟随（--nts-spec-x/y，百分比），无指针设备时停在左上。
+    var SPEC_AT = 'var(--nts-spec-x, 28%) var(--nts-spec-y, 14%)';
+    // 滚动时镜面收敛 45%（--nts-scroll-k 由 initGlassPointer 的滚动监听写入）。
+    var SPEC_ALPHA = 'calc(' + V_S + ' * (1 - 0.45 * ' + V_K + '))';
+
+    var EDGE = ['rim', 'thickness', 'lens', 'dispersion'];
+
+    // 1) 边缘 + 厚度：由 --nts-glass-highlight outline 占用的 4 个表面。
+    //    用 box-shadow 组合而不是 outline：不抢生成的 !important outline。
+    function edgeShadow(withShadowVar) {
+      var parts = [
+        'inset 0 1px 0 ' + RIM,
+        'inset 0 -1px 0 rgba(0, 0, 0, calc(' + V_T + ' * 0.34))',
+        'inset 1px 0 0 rgba(255, 255, 255, calc(' + V_T + ' * 0.22))',
+        'inset -1px 0 0 rgba(255, 255, 255, calc(' + V_T + ' * 0.16))',
+        'inset 0 0 0 1px rgba(255, 255, 255, calc(' + V_L + ' * 0.50))',
+        'inset 1px 1px 0 rgba(255, 196, 128, calc(' + V_D + ' * 0.55))',
+        'inset -1px -1px 0 rgba(140, 205, 255, calc(' + V_D + ' * 0.50))',
+        'inset 0 1px 12px rgba(255, 255, 255, calc(' + V_T + ' * 0.10))',
+        '0 14px 34px -16px rgba(0, 0, 0, calc(0.30 + ' + V_T + ' * 0.24))'
+      ];
+      if (withShadowVar) parts.push('var(--nts-shadow, 0 0 0 0 rgba(0, 0, 0, 0))');
+      return ['box-shadow: ' + parts.join(',\n    ') + ' !important;'];
+    }
+
+    rule(sel(['.window-topbar', '.composer-input-shell', '.compact-chat-surface-frame',
+      '.composer-icon-button'], EDGE), edgeShadow(false));
+
+    // 2) 气泡组：追加 var(--nts-shadow)，保住主题投影（override 会顶掉生成规则）。
+    rule(sel(['.message-bubble-user', '.message-bubble-assistant',
+      '.compact-export-history-bubble'], EDGE), edgeShadow(true));
+
+    // 3) 没有 outline 冲突的表面：rim 保持 outline，lens/thickness 交给 box-shadow。
+    //    0.4.3：`.compact-export-history-scroll` 已移出 —— 它是按预留槽位定高的消息
+    //    列表容器（无圆角），outline + inset 阴影会沿那块空槽画出直角色带。
+    rule(sel(['.composer-overflow-popover'], EDGE), [
+      'outline: 1px solid ' + RIM + ' !important;',
+      'outline-offset: -1px !important;',
+      'box-shadow: inset 0 -1px 0 rgba(0, 0, 0, calc(' + V_T + ' * 0.30)),' +
+        ' inset 0 0 0 1px rgba(255, 255, 255, calc(' + V_L + ' * 0.45)),' +
+        ' inset 0 1px 0 rgba(255, 255, 255, calc(' + V_T + ' * 0.55)) !important;'
+    ]);
+
+    // 4) 焦点兜底：box-shadow rim 会盖掉这两个表面原生用 box-shadow 画的焦点环，
+    //    键盘焦点必须看得见 → 用 outline 补一条（颜色取宿主自己焦点环的 #40c5f1）。
+    rule(sel(['.composer-input-shell:focus-within'], ['rim']), [
+      'outline: 2px solid rgba(64, 197, 241, 0.62) !important;',
+      'outline-offset: 1px !important;'
+    ]);
+    rule(sel(['.compact-export-history-bubble:focus-visible'], ['rim']), [
+      'outline: 2px solid rgba(64, 197, 241, 0.62) !important;',
+      'outline-offset: 2px !important;'
+    ]);
+
+    // 5) 定位：position:static 的表面需要定位祖先承载伪元素。
+    //    .window-topbar 已 relative；popover absolute、导出气泡 relative，不碰；
+    //    .compact-export-history-scroll 刻意不加 —— 它的 ::before 磨砂层按现有
+    //    定位祖先铺满，改 relative 会让那层的圆角/范围跟着变。
+    var FX = ['specular', 'sheen', 'noise'];
+    rule(sel(['.composer-input-shell', '.message-bubble-user', '.message-bubble-assistant'],
+      ['specular', 'sheen'], null), [
+      'position: relative !important;'
+    ]);
+
+    var specLayer = 'radial-gradient(120% 90% at ' + SPEC_AT + ',' +
+      ' rgba(255, 255, 255, ' + SPEC_ALPHA + ') 0%,' +
+      ' rgba(255, 255, 255, calc(' + SPEC_ALPHA + ' * 0.34)) 34%,' +
+      ' rgba(255, 255, 255, 0) 68%)';
+    var sheenLayer = 'linear-gradient(115deg, transparent 35%,' +
+      ' rgba(255, 255, 255, calc(var(--nts-glass-sheen, 0) * 0.55)) 50%,' +
+      ' transparent 65%)';
+
+    var noiseBody = [
+      'content: "" !important;',
+      'position: absolute !important;',
+      'inset: 0 !important;',
+      'z-index: 0 !important;',
+      'pointer-events: none !important;',
+      'border-radius: inherit !important;',
+      'background-image: ' + GLASS_NOISE_URI + ' !important;',
+      'background-size: 120px 120px !important;',
+      'background-repeat: repeat !important;',
+      'opacity: var(--nts-glass-noise, 0) !important;',
+      'mix-blend-mode: overlay !important;'
+    ];
+
+    // 6) 合成光效层（0.4.0 重构）：ambient 指针光源 + caustic 焦散 + specular 镜面 + sheen 掠光
+    //    四层全部走自定义属性槽位（--nts-fx-*），任何单个变量被配置都能正确合成、互不覆盖。
+    //    0.3.0 那套「黑色遮罩 + noise 叠层」有真实缺陷：veil alpha = 1 - noise，noise 未配置时
+    //    等于全黑不透明层，把下面的 specular/sheen 整个盖掉（再经 screen 混合等于消失），
+    //    所以顶栏与导出区的镜面/掠光在 0.3.0 里其实经常是死的。0.4.0 移除该写法，
+    //    noise 只保留在 5 个 ::before 空闲的表面上（顶栏/导出区不再支持 noise）。
+    var ambientLayer = 'radial-gradient(64% 120% at ' + LIGHT_AT + ',' +
+      ' rgba(255, 255, 255, calc(' + V_A + ' * 0.22)) 0%,' +
+      ' rgba(255, 255, 255, calc(' + V_A + ' * 0.07)) 38%,' +
+      ' rgba(255, 255, 255, 0) 70%)';
+    var causticLayer = 'radial-gradient(58% 46% at 50% 50%,' +
+      ' rgba(255, 255, 255, calc(' + V_C + ' * 0.30)) 0%,' +
+      ' rgba(255, 255, 255, calc(' + V_C + ' * 0.10)) 46%,' +
+      ' rgba(255, 255, 255, 0) 72%)';
+
+    var FX_STRUCT = [
+      'content: "" !important;',
+      'position: absolute !important;',
+      'inset: 0 !important;',
+      'z-index: 0 !important;',
+      'pointer-events: none !important;',
+      'border-radius: inherit !important;'
+    ];
+    // 四个槽位的固定顺序：ambient → caustic → specular → sheen。
+    // 列表长度恒定，所以 background-size/position/blend 的对应关系不会随配置漂移。
+    function fxBody() {
+      return FX_STRUCT.concat([
+        'background-image: var(--nts-fx-amb, none), var(--nts-fx-caustic, none),' +
+          ' var(--nts-fx-spec, none), var(--nts-fx-sheen, none) !important;',
+        'background-size: 100% 100%, 240% 240%, 100% 100%, 220% 100% !important;',
+        'background-repeat: no-repeat, no-repeat, no-repeat, no-repeat !important;',
+        'background-position: 0 0, 50% 50%, 0 0, 120% 0 !important;',
+        'background-blend-mode: screen, screen, screen, screen !important;',
+        'mix-blend-mode: screen !important;',
+        // 两个动画槽位分开挂：只配 sheen 就只跑掠光，只配 caustic 就只跑焦散。
+        'animation: var(--nts-anim-sheen, none), var(--nts-anim-caustic, none) !important;'
+      ]);
+    }
+
+    // 0.4.1 修复：**不要把 `.compact-export-history-scroll` 放进来**。
+    // 它是 position:static（§5 刻意不加 relative，否则会改掉 ::before 磨砂层的锚点），
+    // 于是这里的 absolute + inset:0 的 ::after 会去找更外层的定位祖先铺满，
+    // 表现为导出/历史面板上方多出一整块直角的亮屏（0.4.0 的 ambient/specular
+    // 一打开就非常明显）。只在有确定包含块的 6 个表面上做光效层。
+    var FX_SURFACES = ['.window-topbar', '.composer-input-shell', '.composer-overflow-popover',
+      '.message-bubble-user', '.message-bubble-assistant',
+      '.compact-export-history-bubble'];
+    var FX_PROPS = [
+      ['ambient', '--nts-fx-amb', ambientLayer],
+      ['caustic', '--nts-fx-caustic', causticLayer],
+      ['specular', '--nts-fx-spec', specLayer],
+      ['sheen', '--nts-fx-sheen', sheenLayer]
+    ];
+    for (var f = 0; f < FX_PROPS.length; f++) {
+      rule(sel(FX_SURFACES, [FX_PROPS[f][0]], '::after'),
+        fxBody().concat([FX_PROPS[f][1] + ': ' + FX_PROPS[f][2] + ' !important;']));
+    }
+    // 动画只在对应变量配置时挂（0.3.0 是无条件挂 sheen 动画，sheen=0 时纯浪费）。
+    rule(sel(FX_SURFACES, ['sheen'], '::after'), [
+      '--nts-anim-sheen: nts-glass-sheen 7.5s ease-in-out infinite !important;'
+    ]);
+    rule(sel(FX_SURFACES, ['caustic'], '::after'), [
+      '--nts-anim-caustic: nts-glass-caustic 13s ease-in-out infinite !important;'
+    ]);
+
+    // 7) 噪声（::before）：只剩 5 个伪元素空闲的表面；顶栏与导出区不参与。
+    var noiseBody = [
+      'content: "" !important;',
+      'position: absolute !important;',
+      'inset: 0 !important;',
+      'z-index: 0 !important;',
+      'pointer-events: none !important;',
+      'border-radius: inherit !important;',
+      'background-image: ' + GLASS_NOISE_URI + ' !important;',
+      'background-size: 120px 120px !important;',
+      'background-repeat: repeat !important;',
+      'opacity: var(--nts-glass-noise, 0) !important;',
+      'mix-blend-mode: overlay !important;'
+    ];
+    var dual = ['.composer-input-shell', '.composer-overflow-popover', '.message-bubble-user',
+      '.message-bubble-assistant', '.compact-export-history-bubble'];
+    for (var i = 0; i < dual.length; i++) {
+      rule(sel([dual[i]], ['noise'], '::before'), noiseBody);
+    }
+
+    // 8) 掠光扫过（只动 background-position 的第 4 层 = sheen）。
+    //    60% 之后停在同一位置：带子扫出去后静止一段再回卷，避免硬回弹。
+    lines.push('@keyframes nts-glass-sheen {\n' +
+      '  0% { background-position: 0 0, 50% 50%, 0 0, 120% 0; }\n' +
+      '  60%, 100% { background-position: 0 0, 50% 50%, 0 0, -40% 0; }\n' +
+      '}');
+    // 9) 焦散呼吸（只动 background-size 的第 2 层 = caustic）：
+    //    光斑缓慢胀缩，像水面折出来的光在玻璃后面晃。
+    lines.push('@keyframes nts-glass-caustic {\n' +
+      '  0%, 100% { background-size: 100% 100%, 240% 240%, 100% 100%, 220% 100%; }\n' +
+      '  50% { background-size: 100% 100%, 300% 260%, 100% 100%, 220% 100%; }\n' +
+      '}');
+
+    // 9) 「液」：按压时玻璃轻微压扁（只给真正可点的两个表面，避免动到消息气泡的滚动）。
+    rule(sel(['.composer-icon-button'], ['thickness'], ':active'), [
+      'transform: scale(0.965) !important;'
+    ]);
+    rule(sel(['.composer-overflow-popover'], ['thickness'], ':active'), [
+      'transform: scale(0.985) !important;'
+    ]);
+
+    // 10) 窗口不可见时暂停所有 NTS 动画（0.4.0 性能项）：后台标签页不再持续合成。
+    //     选择器用 :root[data-nts-paused] + 4 个 :root，压过生成 CSS 里的高特异度规则。
+    var PAUSE_HEAD = ':root[data-nts-paused]:root:root:root:root body ';
+    var pauseSel = [];
+    for (var q = 0; q < FX_SURFACES.length; q++) {
+      pauseSel.push(PAUSE_HEAD + FX_SURFACES[q] + '::after');
+    }
+    for (var n2 = 0; n2 < dual.length; n2++) {
+      pauseSel.push(PAUSE_HEAD + dual[n2] + '::before');
+    }
+    // 0.4.3：面板装饰层已从历史浮层 (scroll) 迁到紧凑态真实面板
+    // (.compact-chat-surface-frame) 的 ::after，与生成 CSS 的 NTS_GLOW 一致。
+    pauseSel.push(PAUSE_HEAD + '.compact-chat-surface-frame::after');
+    lines.push(pauseSel.join(',\n') + ' { animation-play-state: paused !important; }');
+
+    // 11) 减少动态偏好：停掉扫动/焦散（光带停在视野外，只剩 rim / 厚度 / 镜面，不闪）。
+    var rmTargets = FX_SURFACES.slice();
+    var rmSel = [];
+    for (var r = 0; r < rmTargets.length; r++) {
+      rmSel.push(':root[' + ACTIVE_ATTR + '] body ' + rmTargets[r] + '::after');
+    }
+
+    // 12) 主题切换过渡（v1.5.20）：applyPalette 检测到版本戳变化时给 :root 打 420ms
+    //     的 data-nts-fade，功能层颜色/边框/阴影在 280ms 内渐变而不是硬切。
+    //     初始加载（无 previousStamp）与内容未变都不闪；减少动态偏好里直接关掉。
+    var FADE_SURFACES = ['.window-topbar', '.composer-input-shell', '.compact-chat-surface-frame',
+      '.composer-icon-button', '.composer-overflow-popover',
+      '.message-bubble-user', '.message-bubble-assistant',
+      '.compact-export-history-bubble', '.message-list', '.chat-body'];
+    var fadeSel = [];
+    for (var fd = 0; fd < FADE_SURFACES.length; fd++) {
+      fadeSel.push(LIGHT + '[data-nts-fade] body ' + FADE_SURFACES[fd]);
+      fadeSel.push(DARK + '[data-nts-fade] body ' + FADE_SURFACES[fd]);
+    }
+    lines.push(fadeSel.join(',\n') + ' {\n  transition: background-color .28s ease, color .28s ease,' +
+      ' border-color .28s ease, box-shadow .28s ease, outline-color .28s ease !important;\n}');
+    lines.push('@media (prefers-reduced-motion: reduce) {');
+    lines.push('  ' + rmSel.join(',\n  ') + ' { animation: none !important; }');
+    lines.push('  ' + fadeSel.join(',\n  ') + ' { transition: none !important; }');
+    lines.push('}');
+
+    return lines.join('\n');
+  })();
+
+  var MATERIAL_CSS = [
+    '/* ===== 高级材质层（契约 0.4.0） =====',
+    '   全部规则门控在 :root[data-nts-mt] 上：没有该属性 = 一条都不匹配 = 应用完全保持原始外观。',
+    '   只写 background / border / box-shadow / backdrop-filter / border-radius / animation，',
+    '   不碰 color / display / position / width / height / overflow / z-index / transform ——',
+    '   文本可读性、布局与点击区域都不受材质影响。 */',
+    ':root[data-nts-mt] { --nts-mt-mx: 50%; --nts-mt-my: 50%; --nts-mt-light-angle: 162deg; }',
+    '',
+    '/* ---- 组件级变量绑定（先查组件专属值，缺失则回退全局） ---- */',
+    ':root[data-nts-mt] .compact-chat-surface-frame,',
+    ':root[data-nts-mt] .chat-window,',
+    ':root[data-nts-mt] #react-chat-window-shell {',
+    '  --nts-mt-bg-c: var(--nts-mt-c-bg-chat, var(--nts-mt-bg));',
+    '  --nts-mt-blur-c: var(--nts-mt-c-blur-chat, var(--nts-mt-blur));',
+    '  --nts-mt-bw-c: var(--nts-mt-c-border-width-chat, var(--nts-mt-border-width));',
+    '  --nts-mt-radius-c: var(--nts-mt-c-radius-chat, var(--nts-mt-radius-card));',
+    '  --nts-mt-shadow-c: var(--nts-mt-c-shadow-chat, var(--nts-mt-shadow));',
+    '}',
+    ':root[data-nts-mt] .message-bubble-user,',
+    ':root[data-nts-mt] .message-bubble-assistant,',
+    ':root[data-nts-mt] .message-bubble-tool,',
+    ':root[data-nts-mt] .message-bubble-system,',
+    ':root[data-nts-mt] .compact-export-history-bubble {',
+    '  --nts-mt-bg-c: var(--nts-mt-c-bg-bubble, var(--nts-mt-bg));',
+    '  --nts-mt-blur-c: var(--nts-mt-c-blur-bubble, var(--nts-mt-blur));',
+    '  --nts-mt-bw-c: var(--nts-mt-c-border-width-bubble, var(--nts-mt-border-width));',
+    '  --nts-mt-radius-c: var(--nts-mt-c-radius-bubble, var(--nts-mt-radius));',
+    '  --nts-mt-shadow-c: var(--nts-mt-c-shadow-bubble, var(--nts-mt-shadow));',
+    '}',
+    ':root[data-nts-mt] .composer-input-shell,',
+    ':root[data-nts-mt] .composer-input,',
+    ':root[data-nts-mt] .composer-panel {',
+    '  --nts-mt-bg-c: var(--nts-mt-c-bg-input, var(--nts-mt-bg));',
+    '  --nts-mt-blur-c: var(--nts-mt-c-blur-input, var(--nts-mt-blur));',
+    '  --nts-mt-bw-c: var(--nts-mt-c-border-width-input, var(--nts-mt-border-width));',
+    '  --nts-mt-radius-c: var(--nts-mt-c-radius-input, var(--nts-mt-radius-input));',
+    '  --nts-mt-shadow-c: var(--nts-mt-c-shadow-input, var(--nts-mt-shadow));',
+    '}',
+    ':root[data-nts-mt] .message-list {',
+    '  --nts-mt-bg-c: var(--nts-mt-c-bg-sidebar, var(--nts-mt-bg));',
+    '  --nts-mt-blur-c: var(--nts-mt-c-blur-sidebar, var(--nts-mt-blur));',
+    '  --nts-mt-bw-c: var(--nts-mt-c-border-width-sidebar, var(--nts-mt-border-width));',
+    '  --nts-mt-radius-c: var(--nts-mt-c-radius-sidebar, var(--nts-mt-radius-card));',
+    '  --nts-mt-shadow-c: var(--nts-mt-c-shadow-sidebar, var(--nts-mt-shadow));',
+    '}',
+    ':root[data-nts-mt] .window-topbar {',
+    '  --nts-mt-bg-c: var(--nts-mt-c-bg-topbar, var(--nts-mt-bg));',
+    '  --nts-mt-blur-c: var(--nts-mt-c-blur-topbar, var(--nts-mt-blur));',
+    '  --nts-mt-bw-c: var(--nts-mt-c-border-width-topbar, var(--nts-mt-border-width));',
+    '  --nts-mt-radius-c: var(--nts-mt-c-radius-topbar, var(--nts-mt-radius-card));',
+    '  --nts-mt-shadow-c: var(--nts-mt-c-shadow-topbar, var(--nts-mt-shadow));',
+    '}',
+    ':root[data-nts-mt] body.api-key-settings-page #main-content {',
+    '  --nts-mt-bg-c: var(--nts-mt-c-bg-settings, var(--nts-mt-bg));',
+    '  --nts-mt-blur-c: var(--nts-mt-c-blur-settings, var(--nts-mt-blur));',
+    '  --nts-mt-bw-c: var(--nts-mt-c-border-width-settings, var(--nts-mt-border-width));',
+    '  --nts-mt-radius-c: var(--nts-mt-c-radius-settings, var(--nts-mt-radius-dialog));',
+    '  --nts-mt-shadow-c: var(--nts-mt-c-shadow-settings, var(--nts-mt-shadow));',
+    '}',
+    ':root[data-nts-mt] .modal-overlay,',
+    ':root[data-nts-mt] .modal-dialog,',
+    ':root[data-nts-mt] .modal-content {',
+    '  --nts-mt-bg-c: var(--nts-mt-c-bg-dialog, var(--nts-mt-bg));',
+    '  --nts-mt-blur-c: var(--nts-mt-c-blur-dialog, var(--nts-mt-blur));',
+    '  --nts-mt-bw-c: var(--nts-mt-c-border-width-dialog, var(--nts-mt-border-width));',
+    '  --nts-mt-radius-c: var(--nts-mt-c-radius-dialog, var(--nts-mt-radius-dialog));',
+    '  --nts-mt-shadow-c: var(--nts-mt-c-shadow-dialog, var(--nts-mt-shadow));',
+    '}',
+    ':root[data-nts-mt] .agent-plugin-view {',
+    '  --nts-mt-bg-c: var(--nts-mt-c-bg-plugin, var(--nts-mt-bg));',
+    '  --nts-mt-blur-c: var(--nts-mt-c-blur-plugin, var(--nts-mt-blur));',
+    '  --nts-mt-bw-c: var(--nts-mt-c-border-width-plugin, var(--nts-mt-border-width));',
+    '  --nts-mt-radius-c: var(--nts-mt-c-radius-plugin, var(--nts-mt-radius-card));',
+    '  --nts-mt-shadow-c: var(--nts-mt-c-shadow-plugin, var(--nts-mt-shadow));',
+    '}',
+    ':root[data-nts-mt] .composer-overflow-popover,',
+    ':root[data-nts-mt] .composer-overflow-menu,',
+    ':root[data-nts-mt] .composer-icon-popover {',
+    '  --nts-mt-bg-c: var(--nts-mt-c-bg-menu, var(--nts-mt-bg));',
+    '  --nts-mt-blur-c: var(--nts-mt-c-blur-menu, var(--nts-mt-blur));',
+    '  --nts-mt-bw-c: var(--nts-mt-c-border-width-menu, var(--nts-mt-border-width));',
+    '  --nts-mt-radius-c: var(--nts-mt-c-radius-menu, var(--nts-mt-radius-card));',
+    '  --nts-mt-shadow-c: var(--nts-mt-c-shadow-menu, var(--nts-mt-shadow));',
+    '}',
+    '',
+    '/* ---- 基础面：一次声明，全部走 -c 变量 ---- */',
+    ':root[data-nts-mt]:root:root:root:root body .compact-chat-surface-frame,',
+    ':root[data-nts-mt]:root:root:root:root body .chat-window,',
+    ':root[data-nts-mt]:root:root:root:root body #react-chat-window-shell,',
+    ':root[data-nts-mt]:root:root:root:root body .message-bubble-user,',
+    ':root[data-nts-mt]:root:root:root:root body .message-bubble-assistant,',
+    ':root[data-nts-mt]:root:root:root:root body .message-bubble-tool,',
+    ':root[data-nts-mt]:root:root:root:root body .message-bubble-system,',
+    ':root[data-nts-mt]:root:root:root:root body .compact-export-history-bubble,',
+    ':root[data-nts-mt]:root:root:root:root body .composer-input-shell,',
+    ':root[data-nts-mt]:root:root:root:root body .composer-panel,',
+    ':root[data-nts-mt]:root:root:root:root body .message-list,',
+    ':root[data-nts-mt]:root:root:root:root body .window-topbar,',
+    ':root[data-nts-mt]:root:root:root:root body .modal-dialog,',
+    ':root[data-nts-mt]:root:root:root:root body .modal-overlay,',
+    ':root[data-nts-mt]:root:root:root:root body .agent-plugin-view,',
+    ':root[data-nts-mt]:root:root:root:root body .composer-overflow-popover,',
+    ':root[data-nts-mt]:root:root:root:root body.api-key-settings-page #main-content,',
+    ':root[data-nts-mt]:root:root:root:root body.api-key-settings-page .container,',
+    ':root[data-nts-mt]:root:root:root:root body .composer-icon-popover {',
+    '  background-color: var(--nts-mt-bg-c) !important;',
+    '  background-image:',
+    '    var(--nts-mt-inner-img),',
+    '    var(--nts-mt-inner2),',
+    '    var(--nts-mt-rim-img),',
+    '    var(--nts-mt-sheen-img),',
+    '    var(--nts-mt-spot),',
+    '    var(--nts-mt-noise-img),',
+    '    var(--nts-mt-ambient-img),',
+    '    linear-gradient(var(--nts-mt-refract-tint), var(--nts-mt-refract-tint)),',
+    '    var(--nts-mt-dye) !important;',
+    '  background-size: auto, auto, auto, auto, auto, auto, var(--nts-mt-ambient-size) var(--nts-mt-ambient-size),',
+    '    var(--nts-mt-refract-size) var(--nts-mt-refract-size), var(--nts-mt-drift-size) !important;',
+    '  background-repeat: no-repeat !important;',
+    '  background-position: 0 0, 0 0, 0 0, 0 0, center, 0 0, 0 0, 0 0, 0% 50% !important;',
+    '  border-style: solid !important;',
+    '  border-color: var(--nts-mt-border) !important;',
+    '  border-width: var(--nts-mt-bw-c) !important;',
+    '  border-radius: var(--nts-mt-radius-c) !important;',
+    '  box-shadow:',
+    '    var(--nts-mt-shadow-c),',
+    '    var(--nts-mt-inset),',
+    '    inset 0 var(--nts-mt-edge-width) 0 var(--nts-mt-edge-t),',
+    '    inset 0 calc(-1 * var(--nts-mt-edge-width)) 0 var(--nts-mt-edge-b),',
+    '    inset var(--nts-mt-edge-width) 0 0 var(--nts-mt-edge-l),',
+    '    inset calc(-1 * var(--nts-mt-edge-width)) 0 0 var(--nts-mt-edge-r),',
+    '    inset 0 0 var(--nts-mt-lens-blur) var(--nts-mt-lens-glow),',
+    '    inset 0 0 calc(var(--nts-mt-edge-width) * 6) var(--nts-mt-rim-shade),',
+    '    inset 0 calc(var(--nts-mt-edge-width) * -1.2) calc(var(--nts-mt-edge-width) * 1.8) var(--nts-mt-under-glow),',
+    '    inset 0 calc(var(--nts-mt-lens) * -1.4) calc(var(--nts-mt-lens) * 2.8) calc(var(--nts-mt-lens) * -1) var(--nts-mt-heel),',
+    '    inset var(--nts-mt-disp-shift) 0 var(--nts-mt-disp-blur) var(--nts-mt-disp-warm),',
+    '    inset calc(var(--nts-mt-disp-shift) * -1) 0 var(--nts-mt-disp-blur) var(--nts-mt-disp-cool),',
+    '    inset 0 calc(-1 * var(--nts-mt-liquid-amp)) calc(var(--nts-mt-liquid-amp) * 2) var(--nts-mt-refract-tint) !important;',
+    '  transition: background-color var(--nts-mt-exit-duration) var(--nts-mt-easing),',
+    '              box-shadow var(--nts-mt-hover-duration) var(--nts-mt-easing) !important;',
+    '}',
+
+    '/* 背景模糊只给自身不带 transform / filter 的容器；壳体 / 内层 / 弹出层 / 导出气泡在下方禁模糊组。 */',
+    ':root[data-nts-mt]:root:root:root:root body .compact-chat-surface-frame,',
+    ':root[data-nts-mt]:root:root:root:root body .chat-window,',
+    ':root[data-nts-mt]:root:root:root:root body .message-bubble-user,',
+    ':root[data-nts-mt]:root:root:root:root body .message-bubble-assistant,',
+    ':root[data-nts-mt]:root:root:root:root body .message-bubble-tool,',
+    ':root[data-nts-mt]:root:root:root:root body .message-bubble-system,',
+    ':root[data-nts-mt]:root:root:root:root body .composer-input-shell,',
+    ':root[data-nts-mt]:root:root:root:root body .composer-panel,',
+    ':root[data-nts-mt]:root:root:root:root body .message-list,',
+    ':root[data-nts-mt]:root:root:root:root body .window-topbar,',
+    ':root[data-nts-mt]:root:root:root:root body .modal-dialog,',
+    ':root[data-nts-mt]:root:root:root:root body .modal-overlay,',
+    ':root[data-nts-mt]:root:root:root:root body .agent-plugin-view,',
+    ':root[data-nts-mt]:root:root:root:root body .composer-overflow-popover,',
+    ':root[data-nts-mt]:root:root:root:root body.api-key-settings-page #main-content,',
+    ':root[data-nts-mt]:root:root:root:root body.api-key-settings-page .container {',
+    '  -webkit-backdrop-filter: blur(var(--nts-mt-blur-c)) saturate(var(--nts-mt-saturation)) brightness(var(--nts-mt-brightness)) contrast(1.03) !important;',
+    '  backdrop-filter: blur(var(--nts-mt-blur-c)) saturate(var(--nts-mt-saturation)) brightness(var(--nts-mt-brightness)) contrast(1.03) !important;',
+    '}',
+    '/* 聊天窗真正承载底色的是内层 root（调色板层用 !important 给它上实色），',
+    '   材质启用时让它让位，玻璃才能从外壳透出来。 */',
+    ':root[data-nts-mt]:root:root:root:root:root body #react-chat-window-root {',
+    '  background-color: var(--nts-mt-bg-c, var(--nts-mt-bg)) !important;',
+    '  background-image: none !important;',
+    '  -webkit-backdrop-filter: none !important;',
+    '  backdrop-filter: none !important;',
+    '}',
+    '/* 外壳 / 内层 / 弹出层 / 导出气泡自身带 transform、filter 或 will-change（见 audit_mt_backdrop_hazards.py），',
+    '   Chromium 在它们上面做 backdrop-filter 容易整块不绘制：模糊一律撤掉，玻璃靠底色 / 多层背景 / 边框 / 阴影表达。 */',
+    ':root[data-nts-mt]:root:root:root:root:root body #react-chat-window-shell,',
+    ':root[data-nts-mt]:root:root:root:root:root body .composer-icon-popover,',
+    ':root[data-nts-mt]:root:root:root:root:root body .compact-export-history-bubble {',
+    '  -webkit-backdrop-filter: none !important;',
+    '  backdrop-filter: none !important;',
+    '}',
+    '',
+    '/* ---- 设置窗口（api_key_settings.html）：面板里「设置」组件的落点 ----',
+    '   它已并入上面的基础面规则（同一套 9 层背景 + 完整 box-shadow），',
+    '   这样设置窗口与聊天窗才是同一块玻璃。只有圆角要单独收掉 ——',
+    '   全屏窗口加圆角会把内容裁掉；.container 仍从基础面拿 radius-c。 */',
+/* 消息区是整块滚动大面：背后就是同一块窗玻璃，模糊前后看不出差别，
+   但每次滚动都要整块重算 backdrop-filter —— 滚动卡顿的头号来源。背景/圆角/阴影照留。 */
+    ':root[data-nts-mt]:root:root:root body .message-list {',
+    '  -webkit-backdrop-filter: none !important;',
+    '  backdrop-filter: none !important;',
+    '}',
+    '',
+    ':root[data-nts-mt]:root:root body.api-key-settings-page #main-content {',
+    '  border-radius: 0 !important;',
+    '}',
+
+    '/* 设置页内部：宿主把内容区与配置卡片写死成 #fff，只换外壳还是白， */',
+    '   所以内层也要跟随。暗色主题下宿主 dark-mode.css 已有专门规则，这里不抢。 */',
+    ':root[data-nts-mt]:root:root:not([data-theme="dark"]) body.api-key-settings-page .container-content {',
+    '  background-color: transparent !important;',
+    '}',
+    ':root[data-nts-mt]:root:root:not([data-theme="dark"]) body.api-key-settings-page .model-config-container,',
+    ':root[data-nts-mt]:root:root:not([data-theme="dark"]) body.api-key-settings-page .nested-model-config-container,',
+    ':root[data-nts-mt]:root:root:not([data-theme="dark"]) body.api-key-settings-page .custom-api-container {',
+    '  background-color: var(--nts-mt-bg-c) !important;',
+    '  border: var(--nts-mt-bw-c) solid var(--nts-mt-border) !important;',
+    '  border-radius: var(--nts-mt-radius-c) !important;',
+    '  box-shadow: var(--nts-mt-shadow-c) !important;',
+    '}',
+    '  :root[data-nts-mt]:root:root:not([data-theme="dark"]) body.api-key-settings-page .field-row input:focus,',
+    '  :root[data-nts-mt]:root:root:not([data-theme="dark"]) body.api-key-settings-page .field-row select:focus,',
+    '  :root[data-nts-mt]:root:root:not([data-theme="dark"]) body.api-key-settings-page .api-provider-dropdown-trigger:focus-visible {',
+    '  border-color: var(--nts-accent, #40C5F1) !important;',
+    '  box-shadow: 0 0 0 3px rgba(64, 197, 241, 0.18) !important;',
+    '}',
+    ':root[data-nts-mt]:root:root:not([data-theme="dark"]) body.api-key-settings-page .field-row input,',
+    ':root[data-nts-mt]:root:root:not([data-theme="dark"]) body.api-key-settings-page .field-row select,',
+    ':root[data-nts-mt]:root:root:not([data-theme="dark"]) body.api-key-settings-page #current-api-key,',
+    ':root[data-nts-mt]:root:root:not([data-theme="dark"]) body.api-key-settings-page .api-key-info,',
+    ':root[data-nts-mt]:root:root:not([data-theme="dark"]) body.api-key-settings-page .api-provider-dropdown-trigger {',
+    '  background-color: var(--nts-mt-bg-c) !important;',
+    '  border: var(--nts-mt-bw-c) solid var(--nts-mt-border) !important;',
+    '  border-radius: var(--nts-mt-radius-input) !important;',
+    '}',
+    '',
+    '/* ---- 省电模式：高频小元素不再参与背景模糊合成 ----',
+    '   气泡/输入/顶栏背后就是半透明的窗口底，模糊前后几乎看不出差别，',
+    '   但一屏二十个气泡就是二十层 backdrop-filter。saver 档干脆不声明。 */',
+    ':root[data-nts-mt][data-nts-mt-quality="saver"]:root:root body .message-bubble-user,',
+    ':root[data-nts-mt][data-nts-mt-quality="saver"]:root:root body .message-bubble-assistant,',
+    ':root[data-nts-mt][data-nts-mt-quality="saver"]:root:root body .message-bubble-tool,',
+    ':root[data-nts-mt][data-nts-mt-quality="saver"]:root:root body .message-bubble-system,',
+    ':root[data-nts-mt][data-nts-mt-quality="saver"]:root:root body .compact-export-history-bubble,',
+    ':root[data-nts-mt][data-nts-mt-quality="saver"]:root:root body .composer-input-shell,',
+    ':root[data-nts-mt][data-nts-mt-quality="saver"]:root:root body .composer-panel,',
+    ':root[data-nts-mt][data-nts-mt-quality="saver"]:root:root body .message-list,',
+    ':root[data-nts-mt][data-nts-mt-quality="saver"]:root:root body .window-topbar,',
+    ':root[data-nts-mt][data-nts-mt-quality="saver"]:root:root body .composer-overflow-popover,',
+    ':root[data-nts-mt][data-nts-mt-quality="saver"]:root:root body .composer-icon-popover {',
+    '      -webkit-backdrop-filter: none !important;',
+    '      backdrop-filter: none !important;',
+    '}',
+
+    '/* ---- 按钮：体量小，不做噪点/追光，只保留底色/描边/圆角/阴影 ---- */',
+    ':root[data-nts-mt]:root:root body .composer-icon-button,',
+    ':root[data-nts-mt]:root:root body .composer-tool-btn,',
+    ':root[data-nts-mt]:root:root body .send-button-circle,',
+    ':root[data-nts-mt]:root:root body #sendButton {',
+    '  background-color: var(--nts-mt-c-bg-button, var(--nts-mt-bg)) !important;',
+    '  -webkit-backdrop-filter: blur(var(--nts-mt-c-blur-button, var(--nts-mt-blur))) saturate(var(--nts-mt-saturation)) !important;',
+    '  backdrop-filter: blur(var(--nts-mt-c-blur-button, var(--nts-mt-blur))) saturate(var(--nts-mt-saturation)) !important;',
+    '  border: var(--nts-mt-c-border-width-button, var(--nts-mt-border-width)) solid var(--nts-mt-border) !important;',
+    '  border-radius: var(--nts-mt-c-radius-button, var(--nts-mt-radius-button, var(--nts-mt-radius))) !important;',
+    '  box-shadow: var(--nts-mt-c-shadow-button, var(--nts-mt-shadow)),',
+    '    inset 0 1px 0 var(--nts-mt-sheen),',
+    '    inset 0 0 var(--nts-mt-lens-blur) var(--nts-mt-lens-glow) !important;',
+    '  transition: box-shadow var(--nts-mt-hover-duration) var(--nts-mt-easing) !important;',
+    '}',
+    '',
+    '/* ---- 动态：染料缓慢流动 + 环境反射扫过（--nts-mt-anim 关闭时是 none） ---- */',
+    '@keyframes nts-mt-drift {',
+    '  0%   { background-position: 0 0, 0 0, 0 0, 0 0, center, 0 0, 0 0, 0 0, 0% 50%; }',
+    '  50%  { background-position: 0 0, 0 0, 3% 3%, 0 0, center, 0 0, 0 0, 0 0, 100% 50%; }',
+    '  100% { background-position: 0 0, 0 0, 0 0, 0 0, center, 0 0, 0 0, 0 0, 0% 50%; }',
+    '}',
+    ':root[data-nts-mt] .compact-chat-surface-frame,',
+    ':root[data-nts-mt] .chat-window {',
+    '  animation: var(--nts-mt-anim) !important;',
+    '}',
+    '',
+    '/* ---- 交互动效：进入 / 展开 / 悬停 / 按压 ---- */',
+    '@keyframes nts-mt-enter { from { opacity: .01; } to { opacity: 1; } }',
+    '@keyframes nts-mt-expand { from { opacity: .01; } to { opacity: 1; } }',
+    ':root[data-nts-mt] .message-bubble-user,',
+    ':root[data-nts-mt] .message-bubble-assistant {',
+    '  animation: nts-mt-enter var(--nts-mt-enter-duration) var(--nts-mt-easing) both !important;',
+    '}',
+    ':root[data-nts-mt] .composer-overflow-popover,',
+    ':root[data-nts-mt] .composer-overflow-menu,',
+    ':root[data-nts-mt] .composer-icon-popover,',
+    ':root[data-nts-mt] .modal-dialog {',
+    '  animation: nts-mt-expand var(--nts-mt-expand-duration) var(--nts-mt-easing) both !important;',
+    '}',
+    ':root[data-nts-mt]:root:root body .composer-icon-button:hover,',
+    ':root[data-nts-mt]:root:root body .composer-tool-btn:hover,',
+    ':root[data-nts-mt]:root:root body .send-button-circle:hover,',
+    ':root[data-nts-mt]:root:root body .message-bubble-assistant:hover,',
+    ':root[data-nts-mt]:root:root body .composer-overflow-popover:hover,',
+    ':root[data-nts-mt]:root:root body .modal-dialog:hover {',
+    '  box-shadow:',
+    '    var(--nts-mt-shadow-c),',
+    '    var(--nts-mt-inset),',
+    '    inset 0 0 0 1px rgba(255, 255, 255, var(--nts-mt-hover)),',
+    '    inset 0 var(--nts-mt-edge-width) 0 var(--nts-mt-edge-t),',
+    '    inset 0 0 var(--nts-mt-lens-blur) var(--nts-mt-lens-glow),',
+    '    inset 0 0 calc(var(--nts-mt-edge-width) * 6) var(--nts-mt-rim-shade),',
+    '    inset 0 calc(var(--nts-mt-edge-width) * -1.2) calc(var(--nts-mt-edge-width) * 1.8) var(--nts-mt-under-glow),',
+    '    inset 0 calc(var(--nts-mt-lens) * -1.4) calc(var(--nts-mt-lens) * 2.8) calc(var(--nts-mt-lens) * -1) var(--nts-mt-heel) !important;',
+    '}',
+    ':root[data-nts-mt]:root:root body .composer-icon-button:active,',
+    ':root[data-nts-mt]:root:root body .composer-tool-btn:active,',
+    ':root[data-nts-mt]:root:root body .send-button-circle:active,',
+    ':root[data-nts-mt]:root:root body #sendButton:active {',
+    '  box-shadow: var(--nts-mt-shadow-c), inset 0 2px 8px rgba(0, 0, 0, var(--nts-mt-press)) !important;',
+    '  transition-duration: var(--nts-mt-press-duration) !important;',
+    '}',
+    '',
+    '/* ---- 降级：内核不支持背景模糊时，用更实的底色换可读性（不假装有玻璃） ---- */',
+    '@supports not ((-webkit-backdrop-filter: blur(2px)) or (backdrop-filter: blur(2px))) {',
+    '  :root[data-nts-mt]:root:root body .compact-chat-surface-frame,',
+    '  :root[data-nts-mt]:root:root body .message-bubble-user,',
+    '  :root[data-nts-mt]:root:root body .message-bubble-assistant,',
+    '  :root[data-nts-mt]:root:root body .composer-input-shell,',
+    '  :root[data-nts-mt]:root:root body .modal-dialog,',
+    '  :root[data-nts-mt]:root:root body .agent-plugin-view {',
+    '    background-image: linear-gradient(var(--nts-mt-bg-c), var(--nts-mt-bg-c)),',
+    '      linear-gradient(var(--nts-mt-bg-c), var(--nts-mt-bg-c)),',
+    '      var(--nts-mt-inner2), var(--nts-mt-sheen-img), var(--nts-mt-rim-img), var(--nts-mt-spot), var(--nts-mt-noise-img),',
+    '      var(--nts-mt-dye) !important;',
+    // 降级段 8 层，必须自带 size/position：否则会继承主规则那份 9 值，
+    // 噪点被套上 ambient-size（拉成色块）、染料失去 drift-size（不再流动）。
+    '    background-size: auto, auto, auto, auto, auto, auto, auto, var(--nts-mt-drift-size) !important;',
+    '    background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0% 50% !important;',
+    '  }',
+    '}',
+    '',
+    '/* ---- 系统级减弱动效：材质不做任何流动/进入动画 ---- */',
+    '@media (prefers-reduced-motion: reduce) {',
+    '  :root[data-nts-mt] .compact-chat-surface-frame,',
+    '  :root[data-nts-mt] .chat-window,',
+    '  :root[data-nts-mt] .composer-overflow-menu,',
+    '  :root[data-nts-mt] .message-bubble-user,',
+    '  :root[data-nts-mt] .message-bubble-assistant,',
+    '  :root[data-nts-mt] .composer-overflow-popover,',
+    ':root[data-nts-mt] .composer-icon-popover,',
+    '  :root[data-nts-mt] .modal-dialog { animation: none !important; }',
+    '}'
+  ].join('\n');
+
+  // -------------------- 液态玻璃：指针镜面高光 + 滚动流动（v1.5.14，2026-11 重写为 v1.5.19）
+  //
+  // 只写 CSS 变量，不碰任何宿主/主题声明；rAF 节流，pointermove 用 passive。
+  // 每个玻璃表面记自己的目标位置（百分比）与当前值，逐帧向目标靠 22%，
+  // 所以高光是「滑过去」而不是瞬间跳过去 —— 指针停下后动画自然收敛并停帧。
+  //
+  // v1.5.19 修的四个「鼠标动了却没反应」：
+  //   1. 旧版只在 pointermove 时重绘 —— 指针不动、页面在滚/新消息插入时，
+  //      高光位置还停在旧坐标；现在滚动（捕获阶段，含嵌套滚动容器）、
+  //      resize、DOM 重建后都会重绘。
+  //   2. 旧版 MutationObserver 是 350ms 防抖，聊天流式输出时 DOM 一直在变，
+  //      计时器被无限重置 → 表面列表永不刷新（新气泡没光效）；改成 220ms 节流。
+  //   3. 新插入的表面旧版要等下一次指针移动才拿到坐标；现在重建后立刻补一次。
+  //   4. 旧版按 0.1% 字符串比较跳过写值，小范围移动会被吃掉；现在按数值插值，
+  //      收敛到 0.06% 以内才停帧。
+  //
+  // v1.5.20（性能 + 视觉打磨）：
+  //   1. 光效整套休眠：调色板里一个光效变量都没有（非玻璃主题）时，
+  //      refreshGlassPanels / MutationObserver / onGlassPointer 直接返回，
+  //      不再每 220ms 扫 DOM、也不起 rAF —— 普通主题下指针追踪零开销。
+  //   2. 主题切换过渡：applyPalette 检测到版本戳变化时给 :root 打 420ms 的
+  //      data-nts-fade，功能层颜色/边框/阴影在 280ms 内渐变，不再硬切。
+  // -------------------- 包含块修复（v1.5.17）
+  //
+  // 光效层与面板装饰层都是 `position:absolute; inset:0` 的伪元素，依赖宿主元素
+  // 自己是定位祖先。实测（compact 态 neko-chat-window.css）这几个宿主是
+  // `position: static`：.composer-input-shell、.message-bubble-user、
+  // .message-bubble-assistant、.compact-export-history-scroll。它们上面的
+  // absolute 伪元素会一路逃到最近的定位祖先，也就是 position:fixed 的
+  // .compact-export-history-anchor —— 一块比可见面板大、四角笔直的大盒子，
+  // 于是表现为「每个主题都多出一层直角光屏」。
+  //
+  // 不能写死在 CSS 里：有的宿主本身就是 absolute（.composer-overflow-popover），
+  // 统一设 relative 会改掉它的定位语义。所以这里只对**计算值为 static** 的元素
+  // 补 inline relative（布局等价，不产生偏移），并打标记避免重复处理。
+  var GLASS_CONTAIN_SEL = [
+    '.composer-input-shell', '.message-bubble-user',
+    '.message-bubble-assistant'
+  ].join(',');
+
+  function ensureGlassContainment() {
+    var nodes;
+    try { nodes = document.querySelectorAll(GLASS_CONTAIN_SEL); } catch (e) { return; }
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      if (el.getAttribute('data-nts-box') === '1') continue;
+      var pos = 'static';
+      try { pos = window.getComputedStyle(el).position || 'static'; } catch (e2) { /* 保底当 static */ }
+      if (pos === 'static') el.style.position = 'relative';
+      el.setAttribute('data-nts-box', '1');
+    }
+  }
+
+  var GLASS_SURFACE_SEL = [
+    '.window-topbar', '.composer-input-shell', '.compact-chat-surface-frame',
+    '.composer-icon-button', '.composer-overflow-popover',
+    '.message-bubble-user', '.message-bubble-assistant',
+    '.compact-export-history-bubble'
+  ].join(',');
+  var GLASS_FOLLOW = 0.22;      // 每帧向指针目标靠的比例（越大越跟手）
+  var GLASS_SNAP = 0.0006;      // 差值小于 0.06% 就吸附，避免无限微动画
+  var GLASS_REBUILD_MS = 220;   // DOM 变动后的重建节流
+  var GLASS_STALE_MS = 900;     // 列表超过这么久没重建，指针一动就补一次
+  // 光效门控：调色板里一个「光效用变量」都没有时，指针追踪整套直接休眠 ——
+  // 非玻璃主题不必每 220ms 扫一遍 DOM，也不跑 rAF（v1.5.20 性能优化）。
+  var GLASS_FX_VARS = [
+    'glass-filter', 'glass-tint', 'glass-highlight', 'glass-rim', 'glass-specular',
+    'glass-lens', 'glass-thickness', 'glass-sheen', 'glass-noise', 'ambient-glow',
+    'glass-dispersion', 'glass-caustic', 'bubble-glass-filter', 'bubble-glass-tint'
+  ];
+  var glassFxGates = (function () {
+    var out = [];
+    for (var gv = 0; gv < GLASS_FX_VARS.length; gv++) {
+      out.push(GATE_ATTR + 'l-' + GLASS_FX_VARS[gv], GATE_ATTR + 'd-' + GLASS_FX_VARS[gv]);
+    }
+    return out;
+  })();
+
+  function glassFxActive() {
+    var de = document.documentElement;
+    if (!de || !de.hasAttribute) return false;
+    for (var gi = 0; gi < glassFxGates.length; gi++) {
+      if (de.hasAttribute(glassFxGates[gi])) return true;
+    }
+    return false;
+  }
+
+  // 主题切换的短暂过渡（v1.5.20）：应用新主题时给根节点打 420ms 的 data-nts-fade，
+  // 让功能层颜色/边框/阴影在 280ms 内渐变而不是硬切；减少动态时由 CSS 关掉。
+  var FADE_ATTR = 'data-nts-fade';
+  var fadeTimer = 0;
+
+  function flashThemeSwap() {
+    var de = document.documentElement;
+    if (!de || !de.setAttribute) return;
+    if (fadeTimer) clearTimeout(fadeTimer);
+    de.setAttribute(FADE_ATTR, '');
+    fadeTimer = setTimeout(function () {
+      fadeTimer = 0;
+      if (de.removeAttribute) de.removeAttribute(FADE_ATTR);
+    }, 420);
+  }
+
+  var glassPointerBound = false;
+  var glassPanels = [];
+  var glassPointer = { x: -1, y: -1, raf: 0, seen: false };
+  var glassScrollTimer = 0;
+  var glassObserver = null;
+  var glassRebuildTimer = 0;
+  var glassLastRebuild = 0;
+
+  function glassNodes() {
+    try { return document.querySelectorAll(GLASS_SURFACE_SEL); } catch (e) { return []; }
+  }
+
+  function refreshGlassPanels() {
+    glassRebuildTimer = 0;
+    glassLastRebuild = Date.now ? Date.now() : new Date().getTime();
+    // 没有光效变量时不清扫 DOM：非玻璃主题下这里每 220ms 都会白跑一次。
+    if (!glassFxActive()) { glassPanels = []; return; }
+    ensureGlassContainment();
+    var nodes = glassNodes();
+    var next = [];
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      var keep = null;
+      for (var j = 0; j < glassPanels.length; j++) {
+        if (glassPanels[j].el === el) { keep = glassPanels[j]; break; }
+      }
+      // 新表面：cx/cy 留空，第一帧直接落在指针位置（不从 0,0 滑过来）
+      next.push(keep || { el: el, cx: null, cy: null, tx: 0, ty: 0, sx: '', sy: '', lx: '', ly: '' });
+    }
+    glassPanels = next;
+    // 重建后立刻按当前指针重绘：新挂载的气泡/顶栏不用等用户再动鼠标
+    scheduleGlassSpecular();
+  }
+
+  function scheduleGlassRebuild() {
+    if (glassRebuildTimer) return; // 节流：持续变动时每 220ms 也一定重建一次
+    glassRebuildTimer = setTimeout(refreshGlassPanels, GLASS_REBUILD_MS);
+  }
+
+  function glassPct(value) {
+    return (value * 100).toFixed(1) + '%';
+  }
+
+  function paintGlassSpecular() {
+    glassPointer.raf = 0;
+    if (!glassPointer.seen || !glassPanels.length) return;
+    var moving = false;
+    for (var i = 0; i < glassPanels.length; i++) {
+      var g = glassPanels[i], r;
+      try { r = g.el.getBoundingClientRect(); } catch (e) { continue; }
+      if (!r || r.width < 8 || r.height < 8) continue;
+      var tx = (glassPointer.x - r.left) / r.width;
+      var ty = (glassPointer.y - r.top) / r.height;
+      tx = Math.max(-0.25, Math.min(1.25, tx));
+      ty = Math.max(-0.25, Math.min(1.25, ty));
+      g.tx = tx; g.ty = ty;
+      if (g.cx === null || g.cy === null) { g.cx = tx; g.cy = ty; }
+      var dx = tx - g.cx, dy = ty - g.cy;
+      if (Math.abs(dx) > GLASS_SNAP || Math.abs(dy) > GLASS_SNAP) {
+        g.cx += dx * GLASS_FOLLOW;
+        g.cy += dy * GLASS_FOLLOW;
+        moving = true;
+      } else {
+        g.cx = tx; g.cy = ty;
+      }
+      // 镜面：平滑后的位置（有一点「滑」的惯性）
+      var sx = glassPct(g.cx), sy = glassPct(g.cy);
+      if (sx !== g.sx || sy !== g.sy) {
+        g.sx = sx; g.sy = sy;
+        g.el.style.setProperty('--nts-spec-x', sx);
+        g.el.style.setProperty('--nts-spec-y', sy);
+      }
+      // 指针光源：直接用真实指针位置（比镜面更跟手），纵向抬 18% 当作「光源在上方」
+      var lx = glassPct(tx), ly = glassPct(Math.max(0, ty - 0.18));
+      if (lx !== g.lx || ly !== g.ly) {
+        g.lx = lx; g.ly = ly;
+        g.el.style.setProperty('--nts-light-x', lx);
+        g.el.style.setProperty('--nts-light-y', ly);
+      }
+    }
+    if (moving) scheduleGlassSpecular(); // 还有差距就继续跑帧，收敛后自动停
+  }
+
+  function scheduleGlassSpecular() {
+    if (glassPointer.raf) return;
+    glassPointer.raf = window.requestAnimationFrame
+      ? window.requestAnimationFrame(paintGlassSpecular)
+      : window.setTimeout(paintGlassSpecular, 16);
+  }
+
+  function onGlassPointer(e) {
+    if (!e || typeof e.clientX !== 'number' || typeof e.clientY !== 'number') return;
+    glassPointer.x = e.clientX;
+    glassPointer.y = e.clientY;
+    glassPointer.seen = true;
+    if (!glassFxActive()) {
+      if (glassPanels.length) glassPanels = [];
+      return;
+    }
+    // 列表可能因为流式消息/切页而陈旧：指针一动就顺带补建一次
+    var now = Date.now ? Date.now() : new Date().getTime();
+    if (!glassPanels.length || now - glassLastRebuild > GLASS_STALE_MS) scheduleGlassRebuild();
+    scheduleGlassSpecular();
+  }
+
+  // 滚动会让「表面」在静止的指针下面移动；scroll 不冒泡，所以用捕获阶段接住嵌套滚动容器。
+  function onGlassScroll() {
+    var root = document.documentElement;
+    /* 非玻璃主题不写 --nts-scroll-k：这个变量只驱动玻璃镜面收敛，写它会触发
+     * 整页样式重算，而普通主题的滚动是高频事件。切走时把它归零一次，否则
+     * 下次切回玻璃主题仍停在「已收敛」的静止状态。 */
+    if (!glassFxActive()) {
+      if (root && root.style && root.style.getPropertyValue('--nts-scroll-k') === '1') {
+        root.style.setProperty('--nts-scroll-k', '0');
+      }
+      return;
+    }
+    if (root && root.style) root.style.setProperty('--nts-scroll-k', '1');
+    if (glassScrollTimer) clearTimeout(glassScrollTimer);
+    glassScrollTimer = setTimeout(function () {
+      if (root && root.style) root.style.setProperty('--nts-scroll-k', '0');
+    }, 160);
+    scheduleGlassSpecular();
+  }
+
+  function syncAnimationPause() {
+    try {
+      var root = document.documentElement;
+      if (!root) return;
+      if (document.hidden) root.setAttribute('data-nts-paused', '');
+      else root.removeAttribute('data-nts-paused');
+    } catch (e) { /* 无 document.hidden 的环境：保持动画 */ }
+    if (!document.hidden) { scheduleGlassRebuild(); scheduleGlassSpecular(); }
+  }
+
+  function initGlassPointer() {
+    refreshGlassPanels();
+    if (glassPointerBound) return;
+    glassPointerBound = true;
+    try {
+      // 捕获阶段：即使某个组件 stopPropagation，指针移动也不会丢
+      document.addEventListener('pointermove', onGlassPointer, { passive: true, capture: true });
+      document.addEventListener('pointerdown', onGlassPointer, { passive: true, capture: true });
+      document.addEventListener('pointerover', onGlassPointer, { passive: true, capture: true });
+      // 后台标签页暂停所有 NTS 动画：省电，也避免回来后动画相位跳变。
+      document.addEventListener('visibilitychange', syncAnimationPause);
+      syncAnimationPause();
+      document.addEventListener('scroll', onGlassScroll, { passive: true, capture: true });
+      window.addEventListener('scroll', onGlassScroll, { passive: true });
+      window.addEventListener('resize', function () { refreshGlassPanels(); }, { passive: true });
+      // 主题库/消息列表会持续增删节点：节流重建表面列表（旧版防抖在流式输出时会饿死）。
+      if (window.MutationObserver && document.body) {
+        glassObserver = new MutationObserver(function () {
+          if (!glassFxActive()) return; // 非玻璃主题：连重建定时器都不排
+          scheduleGlassRebuild();
+        });
+        glassObserver.observe(document.body, { childList: true, subtree: true });
+      }
+    } catch (e) { /* 极老 WebView：退化成静态高光位置 */ }
+    scheduleGlassSpecular();
   }
 
   /**
@@ -655,6 +1964,27 @@
       if (!/^https?:/i.test(abs)) return;
     } catch (e) { return; }
 
+    // v0.7.0：先看 theme.json 给的指纹。页面 href 里本来就带 -<css8>（模板补丁写的），
+    // 和磁盘指纹一比就知道要不要动 —— 一致就零下载返回，不一致只换 hash 段让浏览器
+    // 按新 URL 取新文件。只有「页面 href 里没有 hash 段」（老模板）才退回下面的
+    // 下载 + 签名比对。
+    if (assetMeta.css8) {
+      var pageHash = readSheetHash(href);
+      if (pageHash === assetMeta.css8) return;
+      if (pageHash) {
+        var swapped = href.replace(/-[0-9a-f]{8}(?=[?&#]|$)/, '-' + assetMeta.css8);
+        if (swapped !== href) {
+          sheetSwapCount += 1;
+          link.setAttribute('href', swapped);
+          try {
+            console.warn('[theme-studio] 样式表不是当前版本（页面 ' + pageHash + ' → 磁盘 ' +
+              assetMeta.css8 + '），已换表（第 ' + sheetSwapCount + ' 次）。');
+          } catch (e5) { /* ignore */ }
+          return;
+        }
+      }
+    }
+
     // 找到页面里已经生效的那张表（href 含同名文件即可）。
     var loaded = null;
     try {
@@ -709,6 +2039,58 @@
    * 同一个旧脚本」（HTTP 缓存没绕开）时两者才会相等，此时停下，避免无限刷新。
    * 另外两次尝试至少间隔 SELF_UPGRADE_MIN_INTERVAL_MS。
    */
+  // ------------------------------------------------- 资源指纹（v0.7.0）
+  // theme.json 现在带 css_sha8 / loader_version（后端 _asset_meta() 算的磁盘指纹）。
+  // 有了它们，两个自愈动作不必再「整份下载再判断」：
+  //   15s 一次下载 158KB CSS 只为比签名、60s 一次下载 126KB JS 只为读一行版本号 ——
+  //   每小时约 45MB/窗口，笔记本上白烧电。字段缺失（旧版插件）时下面的代码原样
+  //   退回旧的下载路径，行为不变。
+  var assetMeta = { css8: '', loaderVersion: '' };
+
+  function rememberAssetMeta(p) {
+    if (!p || typeof p !== 'object') return;
+    var css8 = typeof p.css_sha8 === 'string' ? p.css_sha8 : '';
+    if (/^[0-9a-f]{8}$/.test(css8)) assetMeta.css8 = css8;
+    var ver = typeof p.loader_version === 'string' ? p.loader_version : '';
+    if (/^[0-9]+\.[0-9]+\.[0-9]+$/.test(ver)) assetMeta.loaderVersion = ver;
+  }
+
+  function readSheetHash(href) {
+    var m = /-([0-9a-f]{8})(?=[?&#]|$)/.exec(String(href || ''));
+    return m ? m[1] : '';
+  }
+
+  // 升级重载的全部「让路」判断与守卫（从 selfUpgradeIfNeeded 里抽出来的，
+  // 逻辑逐字未改 —— 两条路径都必须遵守：草稿不让路、流式输出让路、守卫最后落盘）。
+  function reloadForUpgrade(remote, now) {
+      // 不能把用户正在输入的草稿刷掉：输入框有内容就先不重载，等下一轮心跳
+      // （节流 60s）再试。同理会话正在流式输出时也让路，避免打断回复。
+      try {
+        var ta = document.querySelector('textarea.composer-input, #textInputBox');
+        if (ta && ta.value && String(ta.value).trim()) {
+          log('self-upgrade deferred: composer has draft text');
+          return;
+        }
+        if (document.querySelector('.message-block-status, [data-streaming="true"]')) {
+          log('self-upgrade deferred: a reply is in flight');
+          return;
+        }
+      } catch (e8) { /* ignore */ }
+      // 存「正要离开的版本 + 现在」：重载后新实例的 SCRIPT_VERSION 变成 remote，
+      // 与记录的 gVer 不等，于是下一轮照常比对（这是 1.5.0 卡死的修复点）；
+      // 若重载后版本没变（缓存没绕开），则靠冷却期兜底，不会永久锁死。
+      // 注意：这一行必须在所有「让路」判断之后 —— 以前写在最前面，一旦因为草稿或
+      // 流式输出让路，守卫就已经落盘，冷却期 10 分钟内不会再尝试升级。
+      try {
+        window.sessionStorage.setItem(SELF_UPGRADE_GUARD_KEY, SCRIPT_VERSION + '@' + now);
+      } catch (e5) { /* ignore */ }
+      try {
+        console.warn('[theme-studio] 检测到加载器已升级：本窗口 ' + SCRIPT_VERSION +
+          ' → ' + remote + '，正在重新加载本页面以接管（避免新变量被旧脚本丢弃）。');
+      } catch (e6) { /* ignore */ }
+      try { window.location.reload(); } catch (e7) { /* ignore */ }
+  }
+
   function selfUpgradeIfNeeded() {
     var now = Date.now();
     if (now - selfUpgradeAt < SELF_UPGRADE_MIN_INTERVAL_MS) return;
@@ -722,6 +2104,16 @@
       // 同一个版本 + 冷却期内 = 刚重载过却还是这个脚本（缓存没绕开），先停。
       // 冷却期过后允许再试一次，避免一次缓存失误永久锁死升级能力。
       if (gVer === SCRIPT_VERSION && (now - gAt) < SELF_UPGRADE_COOLDOWN_MS) return;
+    }
+
+    // v0.7.0：theme.json 里已经带 loader_version —— 一致就是零下载返回；不一致就
+    // 直接按「新版本已就绪」处理，不必再下载 126KB 的 JS 去正则读一行版本号。
+    // 字段缺失（旧版插件）时下面原样走下载路径。
+    if (assetMeta.loaderVersion && assetMeta.loaderVersion === SCRIPT_VERSION) return;
+    if (assetMeta.loaderVersion) {
+      selfUpgradeAt = now;
+      reloadForUpgrade(assetMeta.loaderVersion, now);
+      return;
     }
 
     var src = '';
@@ -752,30 +2144,7 @@
       var m = /SCRIPT_VERSION\s*=\s*'([^']+)'/.exec(code);
       var remote = m ? m[1] : '';
       if (!remote || remote === SCRIPT_VERSION) return;
-      try {
-        // 存「正要离开的版本 + 现在」：重载后新实例的 SCRIPT_VERSION 变成 remote，
-        // 与记录的 gVer 不等，于是下一轮照常比对（这是 1.5.0 卡死的修复点）；
-        // 若重载后版本没变（缓存没绕开），则靠冷却期兜底，不会永久锁死。
-        window.sessionStorage.setItem(SELF_UPGRADE_GUARD_KEY, SCRIPT_VERSION + '@' + now);
-      } catch (e5) { /* ignore */ }
-      // 不能把用户正在输入的草稿刷掉：输入框有内容就先不重载，等下一轮心跳
-      // （节流 60s）再试。同理会话正在流式输出时也让路，避免打断回复。
-      try {
-        var ta = document.querySelector('textarea.composer-input, #textInputBox');
-        if (ta && ta.value && String(ta.value).trim()) {
-          log('self-upgrade deferred: composer has draft text');
-          return;
-        }
-        if (document.querySelector('.message-block-status, [data-streaming="true"]')) {
-          log('self-upgrade deferred: a reply is in flight');
-          return;
-        }
-      } catch (e8) { /* ignore */ }
-      try {
-        console.warn('[theme-studio] 检测到加载器已升级：本窗口 ' + SCRIPT_VERSION +
-          ' → ' + remote + '，正在重新加载本页面以接管（避免新变量被旧脚本丢弃）。');
-      } catch (e6) { /* ignore */ }
-      try { window.location.reload(); } catch (e7) { /* ignore */ }
+      reloadForUpgrade(remote, now);
     })['catch'](function () { /* 静默降级：拿不到就不升级，行为与旧版一致 */ });
   }
 
@@ -830,18 +2199,534 @@
     }
     return buf.join(';');
   }
+  // ------------------------------------------- 高级材质层（v1.6.0）
+  //
+  // 材质变量由后端 materials.compile_materials() 生成：白名单参数、范围钳制、
+  // 枚举收敛，且每条都带 --nts-mt- 前缀。这里只做形态体检（前缀 / 长度 /
+  // 不能含分号花括号注释），不重跑 sanitizeVars —— 后者按"调色板颜色"语义校验，
+  // gradient、多层 shorthand、关键字 none 会被逐条判非法，材质会整体丢失。
+  var MT_VAR_PREFIX = '--nts-mt-';
+  var MT_ATTR = 'data-nts-mt';
+  var MT_QUALITY_ATTR = 'data-nts-mt-quality';
+  var MT_PRESET_ATTR = 'data-nts-mt-preset';
+  var MT_MAX_VALUE = 400;
+  var mtPointerBound = false;
+  var mtFollow = 0;
+  var mtDelay = 60;
+
+  /** 值形态体检：阻断 CSS 注入（分号 / 花括号 / 尖括号 / 注释起始）。 */
+  function mtValueOk(v) {
+    if (typeof v !== 'string') return false;
+    if (!v || v.length > MT_MAX_VALUE) return false;
+    if (/[;{}<>]/.test(v)) return false;
+    if (v.indexOf(String.fromCharCode(47, 42)) !== -1) return false;
+    return true;
+  }
+
+  /** 取一份材质变量表（mode = light | dark），非法项静默丢弃。 */
+  function materialVarsOf(p, mode) {
+    var out = {};
+    var src = p && p.material_vars;
+    if (!src || typeof src !== 'object') return out;
+    var map = src[mode];
+    if (!map || typeof map !== 'object') return out;
+    for (var k in map) {
+      if (!Object.prototype.hasOwnProperty.call(map, k)) continue;
+      if (String(k).indexOf(MT_VAR_PREFIX) !== 0) continue;
+      var v = map[k];
+      if (typeof v !== 'string') continue;
+      v = v.trim();
+      if (!mtValueOk(v)) continue;
+      out[k] = v;
+    }
+    return out;
+  }
+
+  function countVars(o) {
+    var n = 0;
+    for (var k in o) {
+      if (Object.prototype.hasOwnProperty.call(o, k)) n += 1;
+    }
+    return n;
+  }
+
+  /** 撤掉材质门控属性与指针变量（= 材质完全不起作用）。 */
+  function clearMaterialAttrs() {
+    var de = document.documentElement;
+    if (!de) return;
+    de.removeAttribute(MT_ATTR);
+    de.removeAttribute(MT_QUALITY_ATTR);
+    de.removeAttribute(MT_PRESET_ATTR);
+    if (de.style && de.style.removeProperty) {
+      de.style.removeProperty('--nts-mt-mx');
+      de.style.removeProperty('--nts-mt-my');
+      de.style.removeProperty('--nts-mt-light-angle');
+    }
+    mtFollow = 0;
+    applyRootBypass(false);
+  }
+
+  /**
+   * 聊天窗内层让位：调色板层用 !important 给 #react-chat-window-root 上实色，
+   * 玻璃在外壳上会被整块遮住。内联 !important 是唯一能稳赢 author !important 的位置。
+   */
+  function applyRootBypass(on) {
+    var el = document.querySelector ? document.querySelector('#react-chat-window-root') : null;
+    if (!el || !el.style || !el.style.setProperty) return;
+    if (on) {
+      // 只让「实色底」换成本材质自己的玻璃底（--nts-mt-bg），不是清成 transparent：
+      // 清成 transparent 时整个窗口只剩壳上那层 15% 白玻璃，浅色壁纸下看起来像「聊天框没了」。
+      // background-image 必须保留：那可能是用户的聊天壁纸（--nts-chat-bg-image）。
+      // 2026-11-21 用户就是这么看到「聊天框没了」的。
+      el.style.setProperty('background-color', 'var(--nts-mt-bg, transparent)', 'important');
+    } else {
+      el.style.removeProperty('background-color');
+      el.style.removeProperty('background-image');
+    }
+  }
+
+  /**
+   * 把 material_attrs 同步到 documentElement。
+   * hasVars 为假表示材质未启用 / 无变量 —— 此时必须撤属性，让 MATERIAL_CSS 零匹配。
+   * @param {Object<string,string>} attrs 键名即属性名（data-nts-mt / -quality / -preset）
+   * @param {boolean} hasVars
+   */
+  function syncMaterialAttrs(attrs, hasVars) {
+    var de = document.documentElement;
+    if (!de) return;
+    if (!hasVars || !attrs || typeof attrs !== 'object') { clearMaterialAttrs(); return; }
+    var keys = [MT_ATTR, MT_QUALITY_ATTR, MT_PRESET_ATTR];
+    for (var i = 0; i < keys.length; i += 1) {
+      var v = attrs[keys[i]];
+      if (typeof v === 'string' && v) de.setAttribute(keys[i], v);
+      else de.removeAttribute(keys[i]);
+    }
+    // 指针追光的两个参数在变量里，读一次缓存，避免每次 pointermove 触发重算。
+    if (window.getComputedStyle) {
+      var cs = window.getComputedStyle(de);
+      var follow = parseFloat(cs.getPropertyValue('--nts-mt-mouse-follow'));
+      var delay = parseFloat(cs.getPropertyValue('--nts-mt-mouse-delay'));
+      mtFollow = isNaN(follow) ? 0 : Math.max(0, Math.min(1, follow));
+      mtDelay = (isNaN(delay) || delay < 0) ? 60 : Math.min(300, delay);
+    }
+    applyRootBypass(true);
+  }
+
+  /**
+   * 指针追光：把鼠标位置写进 --nts-mt-mx / -my（百分比）。
+   * 只在鼠标跟随强度 > 0 时写，且按 --nts-mt-mouse-delay 节流，
+   * 大量 pointermove 不会拖动主线程（rAF 合并最后一帧）。
+   */
+  function initMaterialPointer() {
+    if (mtPointerBound) return;
+    mtPointerBound = true;
+    var timer = 0;
+    function onMove(ev) {
+      if (!document.documentElement.hasAttribute(MT_ATTR)) return;
+      if (mtFollow <= 0) return;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(function () {
+        var de = document.documentElement;
+        if (!de.hasAttribute(MT_ATTR)) return;
+        var w = window.innerWidth || 1;
+        var h = window.innerHeight || 1;
+        var x = (ev.clientX / w) * 100;
+        var y = (ev.clientY / h) * 100;
+        var set = function (name, val) {
+          if (de.style && de.style.setProperty) de.style.setProperty(name, val);
+        };
+        var cx = Math.max(0, Math.min(100, x));
+        var cy = Math.max(0, Math.min(100, y));
+        set('--nts-mt-mx', cx.toFixed(2) + '%');
+        set('--nts-mt-my', cy.toFixed(2) + '%');
+        // 光照方向：从面板中心指向指针，sheen 与边缘环带的角度跟着转，
+        // 玻璃才有被光「照到」的方向感（不是固定 162deg 的死高光）。
+        var ang = Math.atan2(cy - 50, cx - 50) * 180 / Math.PI;
+        if (ang < 0) ang += 360;
+        set('--nts-mt-light-angle', ang.toFixed(1) + 'deg');
+      }, mtDelay);
+    }
+    window.addEventListener('pointermove', onMove, { passive: true });
+  }
 
   /**
    * 应用一个调色板。幂等：内容不变则不写 DOM。
    * @param {{vars?:Object,dark_vars?:Object,enabled?:boolean,name?:string,updated_at?:string}} p
    */
+  /* ---------------------------------------------------------------- 诊断上报
+   * 「材质真的注入页面了吗」从宿主外部只能靠推断 —— 而推断不算证据。
+   * 这里把加载器实际观察到的状态回传给插件 entry loader_report，落盘成
+   * static/diagnostics.json：规则数 / 门控属性 / 变量数 / 背板能力 / 指针绑定。
+   * 一分钟最多一次、失败完全静默：诊断永远不能影响主题本身。 */
+  var reportAt = 0;
+  function reportRuntime(force) {
+    try {
+      var now = Date.now();
+      if (!force && reportAt && now - reportAt < 60000) return;
+      // 节流窗口只在**成功写进磁盘后**才占用（见下方 then/catch）：初始化阶段
+      // 插件服务常常比页面晚就绪，第一次必然失败，旧写法把窗口消耗在失败上，
+      // 整个会话就再也等不到第二次上报。
+
+      // v1.6.23：还没真正应用过任何主题就上报，只会写一份「css_len=0 / focus_rules=0」
+      // 的快照，自检读到它会假红（install 之后插件服务重启的那几秒最容易撞上）。
+      // 判据是 lastApply.at —— 正常应用、空调色板、显式禁用三条路径都会写它，
+      // 所以「什么都没应用」不会上报，「已应用」照样能被证明。
+      if (!lastApply || !lastApply.at) {
+        reportAt = 0;
+        return;
+      }
+
+      var attrs = {};
+      var de = document.documentElement;
+      if (de && de.getAttribute) {
+        var attrNames = ['data-nts-mt', 'data-nts-mt-quality', 'data-nts-mt-preset'];
+        for (var i = 0; i < attrNames.length; i++) {
+          var attrValue = de.getAttribute(attrNames[i]);
+          if (attrValue !== null && attrValue !== '') attrs[attrNames[i]] = String(attrValue);
+        }
+      }
+      var rules = 0;
+      try {
+        var styleNode = document.getElementById(STYLE_ID);
+        var sheet = styleNode && styleNode.sheet;
+        if (sheet && sheet.cssRules) rules = sheet.cssRules.length;
+      } catch (e1) { rules = -1; }
+      var cssLen = 0;
+      var focusRules = 0;
+      try {
+        var styleNode2 = document.getElementById(STYLE_ID);
+        if (styleNode2) {
+          cssLen = String(styleNode2.textContent || '').length;
+          var sheet2 = styleNode2.sheet;
+          var list2 = sheet2 && sheet2.cssRules;
+          if (list2) {
+            for (var ri = 0; ri < list2.length; ri += 1) {
+              var sel2 = list2[ri] && list2[ri].selectorText;
+              if (sel2 && String(sel2).indexOf('input:focus') >= 0) focusRules += 1;
+            }
+          }
+        }
+      } catch (e5) { cssLen = -1; }
+      var backdrop = false;
+      try {
+        var cssApi = window.CSS;
+        backdrop = !!(cssApi && cssApi.supports && (
+          cssApi.supports('backdrop-filter', 'blur(2px)') ||
+          cssApi.supports('-webkit-backdrop-filter', 'blur(2px)')
+        ));
+      } catch (e2) { backdrop = false; }
+      var apply = lastApply || {};
+      var issues = [];
+      if (lastError) issues.push(String(lastError).slice(0, 300));
+      if (apply.mt > 0 && !attrs['data-nts-mt']) issues.push('材质变量已注入但门控属性缺失');
+      if (attrs['data-nts-mt'] && rules <= 0) issues.push('门控属性在但 style 规则数为 0');
+      if (!backdrop) issues.push('运行环境不支持 backdrop-filter，材质会走降级背景');
+      // 值级自证：只数「注入几个变量」无法证明窗口里的值是对的（镜像过期、
+      // 门控没打上、变量被覆盖都会让计数照常为正）。读 computed style 采样，
+      // 一眼就能看出环带 / 折光线 / 色散 / 漂移到底有没有落地。
+      var samples = {};
+      try {
+        var cs = window.getComputedStyle ? window.getComputedStyle(de) : null;
+        if (cs && cs.getPropertyValue) {
+          var sampleNames = ['--nts-mt-under-glow', '--nts-mt-rim-img', '--nts-mt-rim-shade',
+            '--nts-mt-disp-warm', '--nts-mt-lens-glow', '--nts-mt-sheen-img',
+            '--nts-mt-bg', '--nts-mt-anim'];
+          for (var si = 0; si < sampleNames.length; si++) {
+            var sv = cs.getPropertyValue(sampleNames[si]);
+            if (sv) samples[sampleNames[si]] = String(sv).slice(0, 160);
+          }
+        }
+      } catch (e3) { samples = {}; }
+      // 组件级材质是否真的落到元素上：组件别名只在组件选择器命中时才会继承下来，
+      // 全局变量有值不代表组件覆盖在生效。
+      try {
+        var compEl = null;
+        var compHit = '';
+        var compProbe = ['#react-chat-window-shell', '.chat-window', '.compact-chat-surface-frame', '.composer-input', '.modal-dialog'];
+        var compRects = {};
+        for (var ci = 0; ci < compProbe.length; ci++) {
+          var cprobe = document.querySelector ? document.querySelector(compProbe[ci]) : null;
+          if (!cprobe) continue;
+          if (!compEl) { compEl = cprobe; compHit = compProbe[ci]; }
+          try {
+            var crect = cprobe.getBoundingClientRect ? cprobe.getBoundingClientRect() : null;
+            if (crect) compRects[compProbe[ci]] = Math.round(crect.width) + 'x' + Math.round(crect.height) + '@' + Math.round(crect.left) + ',' + Math.round(crect.top);
+          } catch (e6) {}
+        }
+        if (compEl && window.getComputedStyle) {
+          var ccs = window.getComputedStyle(compEl);
+          if (ccs && ccs.getPropertyValue) {
+            var compNames = ['--nts-mt-bg-c', '--nts-mt-radius-c', '--nts-mt-blur-c'];
+            for (var cj = 0; cj < compNames.length; cj++) {
+              var cv = ccs.getPropertyValue(compNames[cj]);
+              if (cv) samples[compNames[cj]] = String(cv).slice(0, 160);
+            }
+          }
+        }
+      } catch (e4) { /* 采样失败不影响上报 */ }
+      // v1.6.24：元素级自证 —— 只证明「root 上有变量」不够。用户说「没变化」时，
+      // 必须能回答「这个元素最终算出来的 background-color / backdrop-filter 是什么」。
+      var pageTheme = '';
+      var elemSamples = {};
+      try {
+        if (de && de.getAttribute) pageTheme = String(de.getAttribute('data-theme') || '');
+        if (compEl && window.getComputedStyle) {
+          var ecs = window.getComputedStyle(compEl);
+          var elemProps = ['background-color', 'background-image', 'backdrop-filter', 'border-radius', 'box-shadow', 'opacity',
+            '--nts-mt-bg-c', '--nts-mt-blur-c', '--nts-mt-shadow-c', '--nts-mt-radius-c', '--nts-mt-bg'];
+          for (var pi = 0; pi < elemProps.length; pi++) {
+            var pv = ecs.getPropertyValue(elemProps[pi]);
+            if (pv) elemSamples[elemProps[pi]] = String(pv).slice(0, 140);
+          }
+          var inlineRaw = compEl.getAttribute ? String(compEl.getAttribute('style') || '') : '';
+          if (inlineRaw) elemSamples['__inline'] = inlineRaw.slice(0, 300);
+          var inlineImp = [];
+          var st = compEl.style;
+          if (st && st.length) {
+            for (var ii = 0; ii < st.length && ii < 80; ii++) {
+              var nm = st[ii];
+              if (st.getPropertyPriority && st.getPropertyPriority(nm) === 'important') inlineImp.push(nm);
+            }
+          }
+          elemSamples['__inline_important'] = inlineImp.join(',') || '(none)';
+        }
+      } catch (e6) { elemSamples = {}; }
+      // v1.6.28：谁在遮住玻璃 —— 把聊天窗内层元素的匹配规则与自身样式采出来。
+      var rootInfo = {};
+      try {
+        var rootEl = document.querySelector ? document.querySelector('#react-chat-window-root') : null;
+        if (rootEl) {
+          rootInfo.className = String(rootEl.className || '').slice(0, 160);
+          rootInfo.inline = String(rootEl.getAttribute ? (rootEl.getAttribute('style') || '') : '').slice(0, 240);
+          var rcs = window.getComputedStyle ? window.getComputedStyle(rootEl) : null;
+          if (rcs && rcs.getPropertyValue) {
+            rootInfo.bg = String(rcs.getPropertyValue('background-color') || '').slice(0, 60);
+            rootInfo.bgi = String(rcs.getPropertyValue('background-image') || '').slice(0, 120);
+            rootInfo.bf = String(rcs.getPropertyValue('backdrop-filter') || '').slice(0, 80);
+            rootInfo.opacity = String(rcs.getPropertyValue('opacity') || '').slice(0, 20);
+            rootInfo.visibility = String(rcs.getPropertyValue('visibility') || '').slice(0, 20);
+            rootInfo.display = String(rcs.getPropertyValue('display') || '').slice(0, 20);
+            rootInfo.zIndex = String(rcs.getPropertyValue('z-index') || '').slice(0, 20);
+          }
+          try {
+            var rr = rootEl.getBoundingClientRect();
+            rootInfo.rect = Math.round(rr.width) + 'x' + Math.round(rr.height) + '@' + Math.round(rr.left) + ',' + Math.round(rr.top);
+          } catch (eRect) { rootInfo.rect = ''; }
+          var hits = [];
+          var sheets = document.styleSheets || [];
+          for (var si2 = 0; si2 < sheets.length && hits.length < 8; si2++) {
+            var rs = null;
+            try { rs = sheets[si2].cssRules; } catch (eS) { rs = null; }
+            if (!rs) continue;
+            for (var ri = 0; ri < rs.length && hits.length < 8; ri++) {
+              var rl = rs[ri];
+              var sel2 = rl && rl.selectorText;
+              if (!sel2 || sel2.length > 200) continue;
+              if (sel2.indexOf('chat-window-root') < 0 && sel2.indexOf('chat-body') < 0) continue;
+              var txt2 = String((rl.style && rl.style.cssText) || '');
+              if (txt2.indexOf('background') < 0 && txt2.indexOf('backdrop-filter') < 0) continue;
+              var m2 = false;
+              try { m2 = rootEl.matches ? rootEl.matches(sel2) : false; } catch (eM) { m2 = false; }
+              if (!m2) continue;
+              hits.push(sel2.slice(0, 100) + ' => ' + txt2.slice(0, 160));
+            }
+          }
+          rootInfo.hits = hits.join(' || ');
+        }
+      } catch (e7) { rootInfo = {}; }
+      // v1.6.25：分层采样。聊天窗的可见玻璃可能在 .chat-window 或
+      // .compact-chat-surface-frame 上，而不是 #react-chat-window-shell；
+      // 同时数 CSSOM 里命中该元素的规则条数，区分「规则没进样式表」和「进了但没赢」。
+      var elem2 = {};
+      try {
+        var probes2 = ['#react-chat-window-root', '.chat-body', '.chat-surface', '.chat-window',
+          '.compact-chat-surface-frame', '.message-list', '.composer-input-shell', '.window-topbar'];
+        for (var qi = 0; qi < probes2.length; qi++) {
+          var qel = document.querySelector ? document.querySelector(probes2[qi]) : null;
+          if (!qel || !window.getComputedStyle) continue;
+          var qcs = window.getComputedStyle(qel);
+          elem2[probes2[qi]] = {
+            bg: String(qcs.getPropertyValue('background-color') || '').slice(0, 80),
+            bf: String(qcs.getPropertyValue('backdrop-filter') || '').slice(0, 60)
+          };
+        }
+      } catch (e7) { elem2 = {}; }
+      var shellInfo = {};
+      try {
+        var shellEl = document.querySelector ? document.querySelector('#react-chat-window-shell') : null;
+        if (shellEl && window.getComputedStyle) {
+          var scs = window.getComputedStyle(shellEl);
+          var sb = shellEl.getBoundingClientRect();
+          shellInfo.rect = Math.round(sb.width) + 'x' + Math.round(sb.height) + '@' + Math.round(sb.left) + ',' + Math.round(sb.top);
+          shellInfo.className = String(shellEl.className || '').slice(0, 120);
+          shellInfo.bg = String(scs.getPropertyValue('background-color') || '').slice(0, 60);
+          shellInfo.bgi = String(scs.getPropertyValue('background-image') || '').slice(0, 100);
+          shellInfo.bf = String(scs.getPropertyValue('backdrop-filter') || '').slice(0, 80);
+          shellInfo.opacity = String(scs.getPropertyValue('opacity') || '').slice(0, 20);
+          shellInfo.visibility = String(scs.getPropertyValue('visibility') || '').slice(0, 20);
+          shellInfo.display = String(scs.getPropertyValue('display') || '').slice(0, 20);
+          shellInfo.zIndex = String(scs.getPropertyValue('z-index') || '').slice(0, 20);
+        }
+      } catch (eShell) { shellInfo = {}; }
+      var shellChain = [];
+      try {
+        var shel = document.querySelector ? document.querySelector('#react-chat-window-shell') : null;
+        for (var si2 = 0; si2 < 8 && shel; si2++) {
+          var ssc = window.getComputedStyle ? window.getComputedStyle(shel) : null;
+          var srt = shel.getBoundingClientRect ? shel.getBoundingClientRect() : null;
+          var sdesc = (shel.tagName || '?').toLowerCase();
+          if (shel.id) sdesc += '#' + shel.id;
+          if (shel.className && typeof shel.className === 'string') {
+            var sp = String(shel.className).replace(/^ +| +$/g, '').split(' ');
+            for (var sz = 0; sz < sp.length && sz < 4; sz++) { if (sp[sz]) sdesc += '.' + sp[sz]; }
+          }
+          sdesc += ' ' + (srt ? Math.round(srt.width) + 'x' + Math.round(srt.height) : '?');
+          if (ssc) sdesc += ' disp=' + String(ssc.getPropertyValue('display')) + ' vis=' + String(ssc.getPropertyValue('visibility')) + ' pos=' + String(ssc.getPropertyValue('position')) + ' op=' + String(ssc.getPropertyValue('opacity')) + ' hid=' + String(!!shel.hidden);
+          shellChain.push(sdesc.slice(0, 240));
+          shel = shel.parentElement;
+        }
+      } catch (eShellChain) { shellChain = []; }
+      var centerChain = [];
+      var viewportStr = '';
+      try {
+        viewportStr = String(window.innerWidth || 0) + 'x' + String(window.innerHeight || 0);
+        var cxp = Math.round((window.innerWidth || 0) / 2);
+        var cyp = Math.round((window.innerHeight || 0) / 2);
+        var cnode = document.elementFromPoint ? document.elementFromPoint(cxp, cyp) : null;
+        for (var ci2 = 0; ci2 < 10 && cnode; ci2++) {
+          var csc2 = window.getComputedStyle ? window.getComputedStyle(cnode) : null;
+          var crect2 = cnode.getBoundingClientRect ? cnode.getBoundingClientRect() : null;
+          var cdesc = (cnode.tagName || '?').toLowerCase();
+          if (cnode.id) cdesc += '#' + cnode.id;
+          if (cnode.className && typeof cnode.className === 'string') {
+            var cparts = String(cnode.className).replace(/^ +| +$/g, '').split(' ');
+            for (var cz = 0; cz < cparts.length && cz < 4; cz++) { if (cparts[cz]) cdesc += '.' + cparts[cz]; }
+          }
+          cdesc += ' ' + (crect2 ? Math.round(crect2.width) + 'x' + Math.round(crect2.height) : '?');
+          if (csc2) cdesc += ' bg=' + String(csc2.getPropertyValue('background-color')) + ' bf=' + String(csc2.getPropertyValue('backdrop-filter'));
+          centerChain.push(cdesc.slice(0, 260));
+          cnode = cnode.parentElement;
+        }
+      } catch (eCenter) { centerChain = []; }
+      var mtRuleCount = 0;
+      var mtDeclCount = 0;
+      try {
+        var sn = document.getElementById(STYLE_ID);
+        var sh = sn && sn.sheet;
+        if (sh && sh.cssRules) {
+          for (var ri2 = 0; ri2 < sh.cssRules.length; ri2 += 1) {
+            var st2 = sh.cssRules[ri2];
+            var sel3 = st2 && st2.selectorText;
+            if (sel3 && String(sel3).indexOf('react-chat-window-shell') >= 0) {
+              mtRuleCount += 1;
+              mtDeclCount += (st2.style && st2.style.length) || 0;
+            }
+          }
+        }
+      } catch (e8) { mtRuleCount = -1; }
+      var report = {
+        page: (function () {
+          try {
+            return String((window.location && window.location.pathname) || '').slice(0, 120);
+          } catch (err) { return ''; }
+        })(),
+        version: SCRIPT_VERSION,
+        ntsVars: (apply.light || 0) + (apply.dark || 0),
+        mtVars: apply.mt || 0,
+        attrs: attrs,
+        pageTheme: pageTheme,
+        elemSamples: elemSamples,
+        elem2: elem2,
+        rootInfo: rootInfo,
+        shellInfo: shellInfo,
+        shellChain: shellChain,
+        centerChain: centerChain,
+        viewport: viewportStr,
+        mtRuleCount: mtRuleCount,
+        mtDeclCount: mtDeclCount,
+        compMatched: compHit,
+        compRects: compRects,
+        samples: samples,
+        rules: rules,
+        cssLen: cssLen,
+        focusRules: focusRules,
+        backdrop: backdrop,
+        pointer: !!mtPointerBound,
+        enabled: !!apply.enabled,
+        appliedAt: apply.at ? new Date(apply.at).toISOString() : '',
+        errors: issues
+      };
+      var base = pluginBase();
+      var timeout = FETCH_TIMEOUT_MS;
+      fetchWithTimeout(base + '/security/csrf-token', {
+        cache: 'no-store', credentials: 'omit', mode: 'cors'
+      }, timeout).then(function (res) {
+        if (!res || !res.ok) throw new Error('csrf ' + (res ? res.status : '?'));
+        return res.json();
+      }).then(function (body) {
+        var token = (body && (body.csrf_token || body.token)) || null;
+        if (!token) throw new Error('csrf token missing');
+        return fetchWithTimeout(base + '/runs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token },
+          body: JSON.stringify({ plugin_id: PLUGIN_ID, entry_id: 'loader_report', args: { report: report } }),
+          cache: 'no-store', credentials: 'omit', mode: 'cors'
+        }, timeout);
+      }).then(function () {
+        reportAt = now;
+      }).catch(function () { reportAt = 0; });
+    } catch (e) { /* ignore */ }
+  }
+
   function applyPalette(p) {
     if (!p || typeof p !== 'object') return false;
 
+    // 背景图预热闸门（v1.5.21）：主题真的换了 / 首次应用，而新图还没就绪时，
+    // 先把图预热再改 CSS，避免「旧图撤掉、新图未到」的空白闪烁。
+    // 预热完成后会带着同一份调色板再进本函数一次（那时 warmedImages 已就位）。
+    if (p.enabled !== false) {
+      var warmKey = stampOf(p) + '|' + (p.updated_at ? 'u' : 'n');
+      if (warmKey !== lastWarmKey) {
+        var warmUrls = imageUrlsOf(p);
+        var needWarm = false;
+        for (var wi = 0; wi < warmUrls.length; wi += 1) {
+          if (!warmedImages[warmUrls[wi]]) { needWarm = true; break; }
+        }
+        if (needWarm) {
+          if (warmingKey !== warmKey) {
+            warmingKey = warmKey;
+            warmPending = p;
+            // v1.5.23：每一次预热都有自己的票号。旧实现里 p1 的预热还没结束就来了
+            // p2，p1 的回调会把 warmPending（此时是 p2）直接 apply —— 而 p2 的图
+            // 一张都没预热，闪白照旧，只是换了张图闪。票号对不上就整包丢弃。
+            var warmToken = (warmSeq += 1);
+            log('warming ' + warmUrls.length + ' background image(s) before applying');
+            warmImages(warmUrls, function () {
+              if (warmToken !== warmSeq) {
+                log('drop stale warm callback (' + warmToken + ' != ' + warmSeq + ')');
+                return;
+              }
+              var queued = warmPending;
+              warmPending = null;
+              warmingKey = null;
+              if (queued) applyPalette(queued);
+            });
+          }
+          return true;
+        }
+        lastWarmKey = warmKey;
+      }
+    }
+
     if (p.enabled === false) {
       removeStyle();
+      if (fadeTimer) { clearTimeout(fadeTimer); fadeTimer = 0; }
+      if (document.documentElement && document.documentElement.removeAttribute) {
+        document.documentElement.removeAttribute(FADE_ATTR);
+      }
       currentVersion = stampOf(p);
-      lastApply = { light: 0, dark: 0, enabled: false, at: Date.now() };
+      lastApply = { light: 0, dark: 0, mt: 0, enabled: false, at: Date.now() };
+      reportRuntime();
       return true;
     }
 
@@ -849,15 +2734,21 @@
     var dark = sanitizeVars(p.dark_vars);
     var nLight = Object.keys(light).length;
     var nDark = Object.keys(dark).length;
+    // 高级材质（v1.6.0）：材质是独立子树，与调色板变量并存。
+    var mtLight = materialVarsOf(p, 'light');
+    var mtDark = materialVarsOf(p, 'dark');
+    var nMt = countVars(mtLight) + countVars(mtDark);
 
-    if (!nLight && !nDark) {
-      // 空调色板 = 恢复原样
+    if (!nLight && !nDark && !nMt) {
+      // 空调色板 + 无材质 = 恢复原样
       removeStyle();
       currentVersion = stampOf(p);
-      lastApply = { light: 0, dark: 0, enabled: true, at: Date.now() };
+      lastApply = { light: 0, dark: 0, mt: 0, enabled: true, at: Date.now() };
+      reportRuntime();
       return true;
     }
 
+    var previousStamp = currentVersion;
     var css = '';
     var l = declBlock(light);
     // 亮色值必须限定在「非暗色」，否则只配了亮色时会渗进暗色模式
@@ -865,20 +2756,41 @@
     if (l) css += LIGHT_SCOPE + '{' + l + '}';
     var d = declBlock(dark);
     if (d) css += ':root[data-theme="dark"]{' + d + '}';
+    // 材质变量同样按亮/暗分块，与调色板共用一份 <style>。暗色表是全量的
+    // （暗色缺失时后端已用亮色铺满），所以不会出现"材质半边空"。
+    var ml = declBlock(mtLight);
+    if (ml) css += LIGHT_SCOPE + '{' + ml + '}';
+    var md = declBlock(mtDark);
+    if (md) css += ':root[data-theme="dark"]{' + md + '}';
 
     var el = styleEl();
+    // 探针始终放在最前面：它只用于 CSP 自检，不参与任何门控，也不影响原有变量。
+    // 液态玻璃静态层拼在最后：它是常量字符串、每条规则自带门控，和调色板变量
+    // 一起只写一次 textContent（lastAppliedCss / styleIntact / 去重逻辑都不变）。
+    // v1.6.0：材质层（MATERIAL_CSS）也是常量字符串，与玻璃层一起只写一次 textContent。
+    css = PROBE_CSS + css + '\n' + GLASS_CSS + '\n' + MATERIAL_CSS;
     if (el.textContent !== css) el.textContent = css;
+    lastAppliedCss = css;
     // 门控属性必须在样式生效前同步（同一帧内 setAttribute 与 <style> 内容变化
     // 都会被合并进同一次样式重算，不会闪一下未门控的状态）。
     setGates(light, dark);
+    // 材质门控属性：nMt 为 0 时撤掉 → MATERIAL_CSS 零匹配 → 应用保持原始外观。
+    syncMaterialAttrs(p.material_attrs, nMt > 0);
+    // 主题真的换了（版本戳不同）才做切换过渡；首次应用/内容未变时不闪。
+    if (previousStamp && previousStamp !== stampOf(p)) flashThemeSwap();
+    // 玻璃材质层：绑定指针镜面高光 / 滚动流动（幂等；纯 CSS 变量写入，不改声明）
+    initGlassPointer();
+    initMaterialPointer();
+    probeStyleApplied();
     warnIfCssMissing();
     warnIfModeUncovered(nLight, nDark);
     currentVersion = stampOf(p);
-    lastApply = { light: nLight, dark: nDark, enabled: true, at: Date.now() };
+    lastApply = { light: nLight, dark: nDark, mt: nMt, enabled: true, at: Date.now() };
     // 应用成功后强制刷新一次自检快照：排查时最需要的正是「应用之后」的门控与
     // 注入内容状态，若只在启动时抓一次，快照会是空的、看不出问题。
     lastSnapAt = 0;
     persistSnapshot();
+    reportRuntime();
     return true;
   }
 
@@ -926,30 +2838,154 @@
   //   GET  /security/csrf-token        取令牌（预检回显 allow-origin/allow-headers）
   //   POST /plugins/refresh            重新扫描插件目录 → registry 重新填充
   //   POST /plugin/<id>/start          启动本插件（同时把 auto_start 偏好落盘）
-  // 于是加载器自己就能把整条链路救活，不依赖任何手工操作或宿主开关。
+  // 于是加载器自己就能把整条链路救活（v0.15.5 起受下面两条闸门约束，不越过用户停用）。
+  // 尊重宿主总开关（v0.15.5 起）。外部反馈指出：原来的复活链在 404/503 时无条件把
+  // 插件拉起来 —— 用户明明点了停用，页面却把它救活了。判据必须落在**用户意图**上，
+  // 而不是「本窗口是否成功过」这种无关痕迹。现在两条闸门，任一成立才不再自动拉起：
+  //   1. 插件服务回报 disabled.json 的 disabled=true —— 用户从面板点了「卸载应用侧主题」；
+  //   2. 宿主注册表 /plugins 里该插件 runtime_enabled=false —— 用户在插件管理里停用了它。
+  // 两条探测失败都按「未停用」放行：服务整体没起来时探测本来就不可用，而那时正是最
+  // 需要复活的时候（v0.15.5 曾用「本窗口跑过就永不复活」兜底，代价是崩溃后不能自愈，
+  // 已废弃）。
+  var reviveBlocked = false;
+  var disabledKnown = false;
+  var disabledProbed = false;
+  var disabledAt = 0;
+  var disabledProbing = false;
+  // 探测结果只缓存 30s：应用窗口可能常开好几天，用户中途停用/卸载必须能在下一次
+  // 失败时被发现，不能因为「开机时探到的是启用」就永久放行。
+  var PROBE_TTL_MS = 30000;
+
+  /**
+   * 问一次插件服务「用户是否已卸载应用侧主题」，结果缓存 30s（见 PROBE_TTL_MS）。
+   * 探测失败按「未卸载」处理：宁可保留一次复活能力，也不要因为一个探测请求
+   * 失败就把用户的主题永久掐死。
+   */
+  function probeDisabled(done) {
+    if (disabledProbed && (Date.now() - disabledAt) < PROBE_TTL_MS) { done(disabledKnown); return; }
+    if (disabledProbing) { done(false); return; }
+    disabledProbing = true;
+    fetchWithTimeout(pluginBase() + '/ui/disabled.json', {
+      cache: 'no-store', credentials: 'omit', mode: 'cors'
+    }, FETCH_TIMEOUT_MS).then(function (r) {
+      if (!r || !r.ok) return null;
+      return r.json();
+    }).then(function (j) {
+      disabledKnown = !!(j && j.disabled === true);
+    }, function () {
+      disabledKnown = false;
+    }).then(function () {
+      disabledProbed = true;
+      disabledAt = Date.now();
+      disabledProbing = false;
+      done(disabledKnown);
+    });
+  }
+
+  var runtimeGateProbed = false;
+  var runtimeGateAt = 0;
+  var runtimeGateEnabled = true;
+  var runtimeGateProbing = false;
+
+  /**
+   * 问一次宿主注册表「这个插件是否被用户停用」：GET <服务根>/plugins，
+   * 取 id 匹配项的 runtime_enabled。这是宿主自己的开关，比任何本地痕迹都准。
+   * 探测失败按「启用」处理 —— 服务整体没起来时 /plugins 也会连不上，
+   * 而那种时候正是最需要复活的时候。
+   */
+  function probeRuntimeGate(done) {
+    if (runtimeGateProbed && (Date.now() - runtimeGateAt) < PROBE_TTL_MS) { done(runtimeGateEnabled); return; }
+    if (runtimeGateProbing) { done(true); return; }
+    runtimeGateProbing = true;
+    var root = pluginBase().replace(/\/plugin\/[^/]+$/i, '');
+    fetchWithTimeout(root + '/plugins', {
+      cache: 'no-store', credentials: 'omit', mode: 'cors'
+    }, FETCH_TIMEOUT_MS).then(function (r) {
+      if (!r || !r.ok) return null;
+      return r.json();
+    }).then(function (j) {
+      var list = (j && j.plugins) || [];
+      for (var i = 0; i < list.length; i += 1) {
+        if (list[i] && list[i].id === PLUGIN_ID) {
+          runtimeGateEnabled = list[i].runtime_enabled !== false;
+          return;
+        }
+      }
+      // 注册表里查不到这个插件：可能被卸载或未注册，交给 revive 链 refresh 重建。
+      runtimeGateEnabled = true;
+    }, function () {
+      runtimeGateEnabled = true;
+    }).then(function () {
+      runtimeGateProbed = true;
+      runtimeGateAt = Date.now();
+      runtimeGateProbing = false;
+      done(runtimeGateEnabled);
+    });
+  }
+
   var reviveAt = 0;
   var reviveCount = 0;
   var reviving = false;
   var lastReviveError = null;
+  // 自愈退避的当前间隔（v0.1.11）：1.2s 起，每次失败 ×2，上限 30s；成功后复位。
+  var reviveDelay = REVIVE_BASE_DELAY_MS;
 
-  /** 只有「插件没注册 / 服务不可达」才值得自愈；其它 HTTP 错误自愈没有意义。 */
-  function shouldRevive(msg) {
+  /**
+   * 失败分类（v0.1.11）：只有网络类失败才值得重启插件服务。
+   *   - 连不上 / CORS 拒绝 → fetch 抛 TypeError：Failed to fetch / NetworkError / Load failed
+   *   - 插件没注册（404）或服务未就绪（503）
+   *   - 请求超时（fetchWithTimeout 的 AbortController）
+   * JSON 解析失败、theme.json 契约不符（schema/字段不合法）属于「数据到达但不合法」，
+   * 说明服务是活着的，重启链条（csrf-token → refresh → start）只会制造请求风暴，
+   * 却不可能把一份坏数据变好 —— 所以明确排除。
+   */
+  function isNetworkFailure(msg) {
     if (!msg) return false;
-    if (msg.indexOf('HTTP 404') === 0) return true;
-    if (msg.indexOf('HTTP 503') === 0) return true;
-    // fetch 抛 TypeError（Failed to fetch）= 连接被拒 / 服务没起来
-    return msg.indexOf('Failed to fetch') !== -1 || msg.indexOf('NetworkError') !== -1 ||
-      msg.indexOf('Load failed') !== -1;
+    var m = String(msg);
+    if (m.indexOf('timeout ') === 0 || m.indexOf('TimeoutError') === 0) return true;
+    if (m.indexOf('HTTP 404') === 0 || m.indexOf('HTTP 503') === 0) return true;
+    if (m.indexOf('Failed to fetch') !== -1 || m.indexOf('NetworkError') !== -1) return true;
+    if (m.indexOf('Load failed') !== -1 || m.indexOf('AbortError') !== -1) return true;
+    return false;
+  }
+
+  /** 自愈前置判断（保留旧名字）：只认网络类失败。 */
+  function shouldRevive(msg) {
+    return isNetworkFailure(msg);
   }
 
   function reviveService(msg) {
-    if (reviving) return;
+    if (reviving || reviveBlocked) return;
     if (!shouldRevive(msg)) return;
     if (reviveCount >= REVIVE_MAX_ATTEMPTS) return;
     var now = Date.now();
-    if (reviveAt && now - reviveAt < REVIVE_MIN_INTERVAL_MS) return;
-    reviveAt = now;
+    if (reviveAt && now < reviveAt) return;
+    probeDisabled(function (disabled) {
+      if (disabled) {
+        reviveBlocked = true;
+        log('revive skipped: disabled.json 显示应用侧主题已被用户卸载');
+        return;
+      }
+      probeRuntimeGate(function (enabled) {
+        if (!enabled) {
+          reviveBlocked = true;
+          log('revive skipped: 宿主注册表显示该插件已被用户停用（runtime_enabled=false）');
+          return;
+        }
+        reviveOnce(now);
+      });
+    });
+  }
+
+  function reviveOnce(now) {
+    if (reviving || reviveBlocked) return;
+    // 指数退避（v0.1.11）：第一次失败后 1.2s 就允许重试，之后 2.4 / 4.8 / … 上限 30s。
+    // 旧的固定 12s 在插件冷启动时太慢；而服务真的长时间不可用时，每 12s 打三条
+    // 请求也只是噪音。reviveAt 记「下次最早允许时间」，reviveDelay 每发起一次 ×2，
+    // 成功复活后一起复位。
+    reviveAt = now + reviveDelay;
     reviveCount += 1;
+    reviveDelay = Math.min(reviveDelay * 2, REVIVE_MAX_DELAY_MS);
     reviving = true;
     var base = pluginBase();
     var token = null;
@@ -959,67 +2995,167 @@
       return h;
     };
     var postJson = function (path, tok) {
-      return window.fetch(base + path, {
+      // 自愈链的每一步也必须带超时：csrf 端点假死时 reviving 会永远为 true，
+      // 自愈能力被永久掐死（与 fetchPalette 的 P0 是同一类缺陷）。
+      return fetchWithTimeout(base + path, {
         method: 'POST', headers: okHdrs(tok), body: '{}',
         cache: 'no-store', credentials: 'omit', mode: 'cors'
-      }).then(function (r) { return r.ok; }, function () { return false; });
+      }, FETCH_TIMEOUT_MS).then(function (r) { return r.ok; }, function () { return false; });
     };
-    window.fetch(base + '/security/csrf-token', {
-      cache: 'no-store', credentials: 'omit', mode: 'cors'
-    }).then(function (r) {
-      if (!r || !r.ok) throw new Error('csrf HTTP ' + (r ? r.status : '?'));
-      return r.json();
-    }).then(function (j) {
-      token = (j && (j.csrf_token || j.token)) || null;
-      if (!token) throw new Error('csrf token missing');
-      // 1) 重新扫描插件目录，让 registry 从空恢复（冷启动后最常见的状态）
-      return postJson('/plugins/refresh', token);
-    }).then(function () {
-      // 2) 启动本插件（已运行时返回 already_running，无副作用）
-      return postJson('/plugin/' + encodeURIComponent(PLUGIN_ID) + '/start', token);
-    }).then(function () {
+    try {
+      fetchWithTimeout(base + '/security/csrf-token', {
+        cache: 'no-store', credentials: 'omit', mode: 'cors'
+      }, FETCH_TIMEOUT_MS).then(function (r) {
+        if (!r || !r.ok) throw new Error('csrf HTTP ' + (r ? r.status : '?'));
+        return r.json();
+      }).then(function (j) {
+        token = (j && (j.csrf_token || j.token)) || null;
+        if (!token) throw new Error('csrf token missing');
+        // 1) 重新扫描插件目录，让 registry 从空恢复（冷启动后最常见的状态）
+        return postJson('/plugins/refresh', token);
+      }).then(function (refreshed) {
+        // postJson 返回的是 r.ok：非 2xx 时不能往下算「复活成功」，
+        // 否则服务真挂时每轮退避都会被复位成 1.2s，形成请求风暴。
+        if (!refreshed) throw new Error('plugins/refresh failed');
+        // 2) 启动本插件（已运行时返回 already_running，无副作用）
+        return postJson('/plugin/' + encodeURIComponent(PLUGIN_ID) + '/start', token);
+      }).then(function (started) {
+        if (!started) throw new Error('plugin start failed');
+        reviving = false;
+        lastReviveError = null;
+        // 复活成功：退避复位，下次真挂了还能从 1.2s 迅速开始救。
+        reviveDelay = REVIVE_BASE_DELAY_MS;
+        log('service revived, refetching palette');
+        // 3) 立刻重取一次调色板（插件启动后静态路由才可用）
+        window.setTimeout(function () { fetchPalette(true); }, 600);
+        window.setTimeout(function () { fetchPalette(true); }, 2500);
+      }).catch(function (err) {
+        reviving = false;
+        lastReviveError = (err && err.message) || 'unknown';
+        log('revive failed', lastReviveError);
+      });
+    } catch (e) {
+      // window.fetch 同步抛错（参数非法等）：自愈链没建立，必须自己复位。
       reviving = false;
-      lastReviveError = null;
-      log('service revived, refetching palette');
-      // 3) 立刻重取一次调色板（插件启动后静态路由才可用）
-      window.setTimeout(function () { fetchPalette(true); }, 600);
-      window.setTimeout(function () { fetchPalette(true); }, 2500);
-    }).catch(function (err) {
-      reviving = false;
-      lastReviveError = (err && err.message) || 'unknown';
-      log('revive failed', lastReviveError);
+      lastReviveError = (e && e.message) || 'unknown';
+      log('revive aborted', lastReviveError);
+    }
+  }
+  /**
+   * 带超时的 fetch（v0.1.11 P0）。
+   * 原生 fetch 没有超时：插件端点假死（连接建立了但永不回包）时 Promise 永远
+   * pending，调用方的 inflight 锁就永远不释放 —— 1.5s 轮询被永久卡死，症状是
+   * 「面板改了色，窗口再也不更新，控制台全静默」。用 AbortController 在 8s 后中断，
+   * 并把中断统一成 'timeout <ms>' 错误，便于按「网络类失败」走自愈退避
+   * （与 JSON 解析 / 契约错误区分开，后者不该重启插件服务）。
+   * @param {string} url
+   * @param {Object} opts fetch 选项
+   * @param {number} timeoutMs
+   * @returns {Promise<Response>}
+   */
+  function fetchWithTimeout(url, opts, timeoutMs) {
+    var ms = timeoutMs || FETCH_TIMEOUT_MS;
+    // 极老的宿主没有 AbortController：退回普通 fetch（总比完全不发请求好）。
+    if (typeof window.AbortController !== 'function') return window.fetch(url, opts);
+    var ctrl;
+    try { ctrl = new window.AbortController(); } catch (e0) { return window.fetch(url, opts); }
+    var o = {};
+    for (var k in opts) {
+      if (Object.prototype.hasOwnProperty.call(opts, k)) o[k] = opts[k];
+    }
+    o.signal = ctrl.signal;
+    var timedOut = false;
+    var timer = window.setTimeout(function () {
+      timedOut = true;
+      try { ctrl.abort(); } catch (e1) { /* ignore */ }
+    }, ms);
+    var clearTimer = function () {
+      if (timer) { window.clearTimeout(timer); timer = null; }
+    };
+    var p;
+    try {
+      p = window.fetch(url, o);
+    } catch (e2) {
+      clearTimer();
+      throw e2;
+    }
+    return p.then(function (res) { clearTimer(); return res; }, function (err) {
+      clearTimer();
+      if (timedOut) {
+        var te = new Error('timeout ' + ms + 'ms');
+        te.name = 'TimeoutError';
+        throw te;
+      }
+      throw err;
     });
   }
+
+  /** 契约错误（数据到达但不合法）每个原因只大声报一次；绝不自愈重启。 */
+  var warnedContract = Object.create(null);
+  function warnContractOnce(reason) {
+    lastError = 'contract: ' + reason;
+    lastErrorAt = Date.now();
+    if (warnedContract[reason]) return;
+    warnedContract[reason] = 1;
+    try {
+      console.warn('[theme-studio] 插件返回的调色板不合法（' + reason + '），已忽略且不会重启服务。' +
+        '\n  端点：' + themeUrl() +
+        '\n  多半是 theme.json 被手工改坏，或插件/加载器版本不一致。');
+    } catch (e) { /* ignore */ }
+  }
+
   function fetchPalette(force) {
     if (inflight) return;
     inflight = true;
     var url = themeUrl() + '?_=' + Date.now();
     var opts = { cache: 'no-store', credentials: 'omit', mode: 'cors' };
+    // v0.1.11 P0：无论成功、数据不合法、网络失败还是超时，都在链尾释放 inflight。
+    // 旧实现只在 then/catch 里复位：端点假死（fetch 永远 pending）时轮询永久停摆。
+    var release = function () { inflight = false; };
     var req;
     try {
-      req = window.fetch(url, opts);
+      req = fetchWithTimeout(url, opts, FETCH_TIMEOUT_MS);
     } catch (e) {
-      inflight = false;
+      release();
       return;
     }
     req.then(function (res) {
       if (!res || !res.ok) throw new Error('HTTP ' + (res ? res.status : '?'));
       return res.json();
     }).then(function (p) {
-      inflight = false;
       lastFetchAt = Date.now();
-      if (!p || typeof p !== 'object') return;
+      // 数据到达 = 服务活着：先按成功重置自愈预算（下次真挂了还能再救）。
       lastError = null;
       lastWarnedError = null;
-      // 拉取成功 = 服务健康，重置自愈预算（下次真挂了还能再救）
       reviveCount = 0;
       reviveAt = 0;
+      reviveDelay = REVIVE_BASE_DELAY_MS;
+      // ---- 契约校验（v0.1.11）：数据到达但不合法 → 不触发自愈 ----
+      // 重启插件服务只能救「服务不在」，救不了「返回的 JSON 是坏的」。
+      if (!p || typeof p !== 'object' ||
+          Object.prototype.toString.call(p) !== '[object Object]') {
+        warnContractOnce('theme.json 不是一个 JSON 对象');
+        return;
+      }
+      if (p.schema !== undefined && p.schema !== 1) {
+        warnContractOnce('theme.json 的 schema=' + String(p.schema) + '（本加载器只认 1）');
+        return;
+      }
+      rememberAssetMeta(p);
       var raw = '';
       try { raw = JSON.stringify(p); } catch (e) { raw = ''; }
       // theme.json 不再有 version 字段（v0.1.5 起）：raw 是服务端返回 JSON 的精确
       // 文本，逐字相同就是「没变化」。这比版本号更严格 —— 手工改 theme.json、
       // 重置回同一份内容都能如实反映。
       if (!force && raw === lastRaw) {
+        // v0.1.11 P1：raw 没变 ≠ 主题还在。宿主模板重渲染 / 清理 DOM / 重新挂 CSP
+        // 都可能删掉注入的 <style>，旧实现只看 raw，于是节点没了也永远不重建
+        // —— 表现为「主题在窗口里彻底消失，只有刷新页面才好」。
+        if (!styleIntact()) {
+          log('injected style node missing, rebuilding');
+          applyPalette(p);
+          lastRaw = raw;
+        }
         return; // 无变化
       }
       applyPalette(p);
@@ -1032,7 +3168,6 @@
         }));
       } catch (e) { /* ignore */ }
     }).catch(function (err) {
-      inflight = false;
       var msg = (err && err.message) || 'unknown';
       lastError = msg;
       lastErrorAt = Date.now();
@@ -1046,9 +3181,11 @@
         } catch (e) { /* ignore */ }
       }
       log('fetch failed (keeping cache)', msg);
-      // 插件没注册 / 服务不可达 → 自己把插件服务叫醒（节流，见 reviveService）
-      reviveService(msg);
-    });
+      // v0.1.11 P1：只有网络类失败（连不上 / 404 / 503 / 超时）才重启插件服务。
+      // JSON 解析错误、契约不符说明服务活着，自愈只会把 csrf/refresh 打成风暴。
+      if (isNetworkFailure(msg)) reviveService(msg);
+      else log('non-network failure, self-heal skipped:', msg);
+    }).then(release, release);
   }
 
   function startPolling() {
@@ -1165,7 +3302,12 @@
     /** 打开调试日志 */
     setDebug: function (on) { DEBUG = !!on; },
     /** 立刻手动叫醒插件服务（refresh + start），用于重启后不想等轮询 */
-    revive: function () { reviveCount = 0; reviveAt = 0; reviveService('HTTP 404'); },
+    revive: function () {
+      reviveCount = 0;
+      reviveAt = 0;
+      reviveDelay = REVIVE_BASE_DELAY_MS;
+      reviveService('HTTP 404');
+    },
     /**
      * 自检：把「加载器 → 插件 → CSS」这条链路的运行时状态打成一个对象。
      * 在应用窗口的 DevTools 里执行 `NekoThemeStudio.diagnose()` 即可。
@@ -1215,6 +3357,19 @@
         endpoint: themeUrl(),
         gates: gates,
         styleLen: el ? (el.textContent || '').length : 0,
+        // v0.1.11 自检项：注入节点是否还活着（被宿主删掉时 styleAlive=false）、
+        // 注入样式是否真的生效（CSP 拦截时 cspBlocked=true），以及被值校验拒掉的
+        // 变量名 —— 「面板能存、加载器丢值」时先看 rejectedVars。
+        styleAlive: !!(el && el.parentNode),
+        styleApplied: lastAppliedCss ? styleIntact() : null,
+        cspBlocked: cspWarned,
+        rejectedVars: (function () {
+          var out = [];
+          for (var rk in warnedReject) {
+            if (Object.prototype.hasOwnProperty.call(warnedReject, rk)) out.push(rk);
+          }
+          return out;
+        })(),
         lastApply: lastApply,
         lastFetchAgoMs: lastFetchAt ? Date.now() - lastFetchAt : null,
         lastError: lastError,
@@ -1231,12 +3386,35 @@
           try { return window.sessionStorage.getItem(SELF_UPGRADE_GUARD_KEY) || ''; }
           catch (e) { return ''; }
         })(),
+        // v1.5.19 指针光效自检：panels 是当前挂了光效的表面数，seen=false 表示
+        // 还没收到过 pointermove；sampleSpecX/Y 是第一个表面的镜面位置，
+        // 鼠标移动时它应当跟着变（排查「鼠标动了但没反应」先看这三项）。
+        glassPointer: {
+          seen: glassPointer.seen,
+          x: glassPointer.x,
+          y: glassPointer.y,
+          panels: glassPanels.length,
+          sampleSpecX: glassPanels.length ? glassPanels[0].sx : null,
+          sampleSpecY: glassPanels.length ? glassPanels[0].sy : null,
+          follow: GLASS_FOLLOW
+        },
         bubbleFound: !!bubble,
         bubbleBg: cs ? cs.backgroundColor : null,
         bubbleColor: cs ? cs.color : null
       };
     },
-    _internals: { isSafeValue: isSafeValue, sanitizeVars: sanitizeVars, themeUrl: themeUrl }
+    _internals: {
+      isSafeValue: isSafeValue,
+      sanitizeVars: sanitizeVars,
+      themeUrl: themeUrl,
+      // v0.1.11 新值类型：暴露给自测/排查用（NekoThemeStudio._internals.isSafeFilterChain 等）。
+      isSafeFilterChain: isSafeFilterChain,
+      isSafeGradient: isSafeGradient,
+      // v1.5.19 指针光效：暴露重建/重绘入口，供自测与真机回归脚本调用。
+      refreshGlassPanels: refreshGlassPanels,
+      paintGlassSpecular: paintGlassSpecular,
+      glassSurfaces: function () { return glassPanels.length; }
+    }
   };
 
   log('runtime ready; endpoint =', themeUrl());
@@ -1352,4 +3530,24 @@
   }
   window.NekoThemeStudio.report = persistSnapshot;
   persistSnapshot();
+
+  // 诊断上报的自主调度（v1.6.2）：不能只靠 applyPalette 的调用时机 ——
+  // 页面可见性变化、主题未变时都不会再进 applyPalette，诊断就一直是空的。
+  // 启动 5 秒后一次（兜住"插件服务比页面晚就绪"），之后可见时每分钟一次。
+  (function () {
+    function kickReport() {
+      reportRuntime(true);
+    }
+    setTimeout(kickReport, 5000);
+    setInterval(function () {
+      try {
+        if (document.visibilityState === 'visible') kickReport();
+      } catch (e) { /* ignore */ }
+    }, 60000);
+    try {
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') kickReport();
+      });
+    } catch (e) { /* ignore */ }
+  })();
 })();

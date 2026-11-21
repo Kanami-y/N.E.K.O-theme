@@ -1,0 +1,104 @@
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - name: 检出
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Python 语法检查 + 测试
+        shell: pwsh
+        run: |
+          python -m py_compile plugin/__init__.py
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # 仓库自带 unittest 套件（不依赖 pytest / 宿主 SDK），必须真的跑起来。
+          python -m unittest discover -s plugin/tests -v
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: 前端自测（假 DOM / 纯函数，无需浏览器）
+        shell: pwsh
+        run: |
+          $tests = @(
+              'test/panel-selftest.js',
+              'test/glass-selftest.js',
+              'test/pointer-selftest.js',
+              'test/audit-selftest.js',
+              'test/sync-selftest.js',
+              'test/editor-selftest.js',
+              'test/loader-warm-selftest.js',
+              'test/dump-selftest.js',
+              'test/changes-selftest.js',
+              'test/hover-selftest.js',
+              'test/freshness-selftest.js',
+              'test/batch1-selftest.js',
+              'test/wallpaper-selftest.js',
+              'test/preset3-selftest.js',
+              'test/materials-selftest.js',
+              'test/materials-dom-selftest.js'
+          )
+          foreach ($t in $tests) {
+            Write-Host "node $t"
+            node $t
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
+
+      - name: Node 语法检查
+        shell: pwsh
+        run: |
+          $files = @()
+          $files += Get-ChildItem -Path tools -Filter *.js -File | ForEach-Object { $_.FullName }
+          foreach ($f in @(
+              'app/neko-theme-studio.js',
+              'plugin/static/app.js',
+              'plugin/static/materials.js',
+              'plugin/static/loader/neko-theme-studio.js',
+              'app-patch/files/neko-theme-studio.js'
+          )) {
+            if (Test-Path $f) { $files += (Resolve-Path $f).Path }
+          }
+          $bad = 0
+          foreach ($f in $files) {
+            Write-Host "node --check $f"
+            node --check $f
+            if ($LASTEXITCODE -ne 0) { $bad++ }
+          }
+          if ($bad -gt 0) { exit 1 }
+
+      - name: 版本一致性（plugin.toml → build_info / pyproject / index.html）
+        shell: pwsh
+        run: |
+          node tools/gen-version.js --check
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: 资产同步一致性（plugin/static/loader → app / app-patch）
+        shell: pwsh
+        run: |
+          node tools/sync-assets.js --check
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: 测试与部署路径一致性（可选脚本）
+        shell: pwsh
+        run: |
+          if (Test-Path tools/check-parity.js) {
+            node tools/check-parity.js --check
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          } else {
+            Write-Host 'tools/check-parity.js 不存在，跳过'
+          }

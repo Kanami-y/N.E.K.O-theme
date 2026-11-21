@@ -5,31 +5,43 @@
 ================================================================================
  作用：把主题工坊的两件套（应用侧 CSS/JS + 插件）安装进 N.E.K.O 安装目录。
 
- 它做八件事（对应契约 THEME_CONTRACT.md §1B / §5 / §6 / §8 / §9）：
-   A. 环境检查：确认安装根、模板、static 目录存在
-   B. 备份：templates\index.html / chat.html 的「原始内容」备份到 theme-studio\backup\
-   C. 复制两件套：app\css\neko-theme-studio.css / app\neko-theme-studio.js → resources\bin\static\
+ 它做下面这些事（A–H，对应契约 THEME_CONTRACT.md §1B / §5 / §6 / §8 / §9）：
+   A. 环境检查：安装根 / 模板 / static 目录；非管理员时明确警告（写 resources\bin 可能被拒）
+   B. 备份：模板「原始内容」按内容哈希备份到 theme-studio\backup\
+   C. 复制两件套：plugin\static\loader\neko-theme-studio.{css,js} → resources\bin\static\
       （先复制资源、再写模板标记，避免标记指向还不存在的文件）
-   D. 模板补丁：先对全部目标模板做「只读预检」（锚点唯一 / Jinja 在 / 标记数正常 /
-      不丢 </html> / 内容不骤减），全部通过后才一次性写回；写回时先删旧标记段再插到
-      dark-mode.css 之后
-   E. 复制插件开发源：theme-studio\plugin\ → .neko-plugin-installations\plugins\neko_theme_studio\
-      （构建暂存；旧目录先改名成 .bak 作为回滚点，用户调色板 static\theme.json 会备份并写回）
+      版本单调性守卫：目标 loader 的 SCRIPT_VERSION 比源新时跳过覆盖并警告，
+      除非显式 -ForceDowngrade（防止旧包把新版本降级）。
+   D. 模板补丁（事务化）：先对全部目标模板做「只读预检」（锚点唯一 / Jinja 在 / 标记数正常 /
+      不丢 </html> / 内容不骤减）；通过后把每个模板当前内容快照到 backup\txn-<时间戳>\，
+      再用「临时文件 + Move-Item -Force」原子替换；任一模板写失败或写后复核失败
+      → 全部模板从 txn 快照还原并报错退出（不再只回滚插件目录）。
+   E. 用户数据保命 + 复制插件开发源：
+      * 重装前把已安装插件的 static\theme.json、static\themes\、static\backgrounds\、
+        static\exports\ 备份到 %LOCALAPPDATA%\N.E.K.O\theme-studio-backup\userdata-<时间戳>\；
+      * theme-studio\plugin\ → .neko-plugin-installations\plugins\neko_theme_studio\ 构建暂存；
+      * 复制完成后把用户数据写回暂存目录（static\presets\ 是随包内置只读预设，用新包内容，
+        用户自定义同名预设请放在 static\themes\ 里）；
+      * 旧插件目录先改名成回滚点；插件包版本比源新时跳过重建，除非 -ForceDowngrade。
    F. 构建 + 安装插件（走 48916 plugin-cli；48916 没开就跳过并警告）
-      F6b 收尾：安装成功才删掉回滚点 .bak；「停止自愈」标记在 F5 重载前清除（F6b 再兜底一次）
+      F6b 失败收尾：安装/验证失败时把旧目录还原，并保留「失败现场」与旧目录两份回滚点
+      F7 确保插件处于运行态（面板读/写 entry 的前提）
    G. 验证：全部含锚点的模板标记恰好 1 次 + 资源哈希正确 / 两个静态文件 HTTP 200 /
-      GET /chat 与 / 含标记 / 插件路由与运行态
-   H. 打印变更报告
+      GET /chat 与 / 含标记 / 插件路由与运行态；并报告恢复了多少用户调色板变量
+   H. 清理 + 报告：只有「新安装 + 验证」全部成功才删除旧回滚点、txn 快照和旧用户数据备份；
+      失败时回滚点与用户数据备份全部保留，便于取证/手工恢复。
 
  幂等性（重要）：
-   * 步骤 D 用标记注释先删后插，重复执行结果一致。
+   * 步骤 D 用标记注释先删后插，重复执行结果一致；事务快照只用于失败还原。
    * 步骤 B 用「原始内容哈希」命名备份文件，同一次原始内容只备份一次，且永不删除旧备份。
-   * 步骤 E/F 采用「全量重建」：旧插件目录先改名成 <id>.bak，重新复制并构建安装成功后才删除；
-     安装失败会自动把 .bak 还原回去（不再是「先删后装、失败留半成品」）。
+   * 步骤 E/F 采用「全量重建」：旧插件目录先改名成回滚点，重新复制并构建安装成功后才删除；
+     安装失败会自动把旧目录还原回去，且**保留两份**回滚点（失败现场 + 旧目录）。
+     旧回滚点只在新安装 + 验证全部成功后才删除。
      暂存目录必须在 build 之后、install-plan 之前删除，否则 install-plan 返回
      action=blocked / reason=install_source_ownership_unknown（归属由 plugins.lock.json 决定）。
-     正确顺序：备份旧目录 → 复制 → build → 删暂存目录 → install-plan → install → reload → 删回滚点。
-   * 步骤 C 覆盖式复制，天然幂等。
+     正确顺序：备份用户数据+旧目录 → 复制 → 写回用户数据 → build → 删暂存目录 →
+     install-plan → install → reload → F7 → 验证 → 清理回滚点。
+   * 步骤 C 覆盖式复制，天然幂等（版本守卫命中时跳过）。
    * 若 uninstall.ps1 留下了「停止自愈」标记（%LOCALAPPDATA%\N.E.K.O\theme-studio-disabled），
      本脚本安装成功后会删除它，让插件恢复自愈。
 
@@ -42,11 +54,14 @@
        %LOCALAPPDATA%\N.E.K.O\.neko-plugin-installations\plugins\neko_theme_studio\  （构建暂存，构建后由本脚本删除）
        %LOCALAPPDATA%\N.E.K.O\.neko-plugin-packages\   （由 48916 自己写，不是本脚本写）
 
- 用法：
-   pwsh -File install.ps1
-   pwsh -File install.ps1 -Verify            # 只验证，不改任何文件
-   pwsh -File install.ps1 -SkipPluginInstall # 只打模板补丁 + 复制两件套
-   pwsh -File install.ps1 -AppRoot 'D:\tools\enokoo'
+ 用法（脚本未签名；请用 -NoProfile 调用，避免用户 profile 干扰）：
+   powershell -NoProfile -File install.ps1
+   powershell -NoProfile -File install.ps1 -Verify             # 只验证，不改任何文件
+   powershell -NoProfile -File install.ps1 -SkipPluginInstall  # 只打模板补丁 + 复制两件套
+   powershell -NoProfile -File install.ps1 -AppRoot 'D:\tools\enokoo'
+   powershell -NoProfile -File install.ps1 -ForceDowngrade     # 允许用旧包覆盖更新的已安装版本
+   若被执行策略拦截：请改用「管理员 PowerShell」运行，或自行给脚本签名；
+   不要用 -ExecutionPolicy Bypass 绕过策略（企业环境常被策略/审计拦截）。
 ================================================================================
 #>
 
@@ -66,7 +81,17 @@ param(
     [string] $PluginOnConflict = 'fail',
 
     # 插件源缺失 / 48916 未运行时是否算失败（默认只警告）
-    [Parameter()][switch] $Strict
+    [Parameter()][switch] $Strict,
+
+    # 允许用旧包覆盖「已安装的新版本」（loader 的 SCRIPT_VERSION / 插件包 version）。
+    # 默认目标版本更高时跳过覆盖并警告，避免误降级把用户正在用的新功能打回去。
+    [Parameter()][switch] $ForceDowngrade,
+
+    # 插件仓库根目录（plugin\ 与 app\ 所在）。省略时自动推断：
+    # 脚本所在目录含 plugin\plugin.toml 就用它，否则退回 -AppRoot\theme-studio。
+    # 用途：N.E.K.O 装在别的盘（例如 D:\o）而仓库仍在原处时，用 -AppRoot 只换安装根，
+    # 源文件仍取仓库 —— 否则会误以为「缺少源文件」而写出没有内容哈希的旧式标记。
+    [Parameter()][string] $RepoRoot = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -195,10 +220,9 @@ function Write-TextFilePreserving {
         try {
             [System.IO.File]::WriteAllBytes($tmp, $bytes)
             if (Test-Path -LiteralPath $Path) {
-                # 注意：File.Replace 的第三个参数不能传 $null —— PS5.1 下会抛「路径的形式不合法」，
-                # 所以用一个同目录临时备份名，替换成功后立刻删掉。
-                [System.IO.File]::Replace($tmp, $Path, $bak)
-                if (Test-Path -LiteralPath $bak) { Remove-Item -LiteralPath $bak -Force -ErrorAction SilentlyContinue }
+                # 原子替换：Move-Item -Force 在 NTFS 上走 MoveFileEx(REPLACE_EXISTING)，
+                # 对读取方是原子的；不允许直接用 Set-Content / WriteAllText 先截断再写。
+                Move-Item -LiteralPath $tmp -Destination $Path -Force -ErrorAction Stop
             } else {
                 [System.IO.File]::Move($tmp, $Path)
             }
@@ -211,6 +235,116 @@ function Write-TextFilePreserving {
         }
     }
     throw "写入失败（重试 4 次）：$Path  -> $($lastError.Exception.Message)"
+}
+
+function Write-BytesAtomic {
+    <#  按原始字节原子写文件（临时文件 + Move-Item -Force）。
+        用于 theme.json / meta.json / plugin.toml 等「不允许半截内容」的写入。 #>
+    param(
+        [Parameter(Mandatory)][string] $Path,
+        [Parameter(Mandatory)][AllowEmptyCollection()][byte[]] $Bytes
+    )
+    $dir = Split-Path -Parent $Path
+    if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    $tmp = Join-Path $dir ('.{0}.{1}.tmp' -f (Split-Path -Leaf $Path), [System.Guid]::NewGuid().ToString('N'))
+    $lastError = $null
+    for ($i = 1; $i -le 4; $i++) {
+        try {
+            [System.IO.File]::WriteAllBytes($tmp, $Bytes)
+            if (Test-Path -LiteralPath $Path) {
+                Move-Item -LiteralPath $tmp -Destination $Path -Force -ErrorAction Stop
+            } else {
+                [System.IO.File]::Move($tmp, $Path)
+            }
+            return
+        } catch {
+            $lastError = $_
+            try { if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } } catch { }
+            Start-Sleep -Milliseconds 300
+        }
+    }
+    throw "写入失败（重试 4 次）：$Path  -> $($lastError.Exception.Message)"
+}
+
+function Get-NtsIntegrityLabel([string]$Path) {
+    # 读取对象完整性级别（IL）。返回 Low / Medium / High / System / ''。
+    #
+    # 为什么需要：N.E.K.O 的插件子进程以 **Low IL** 运行
+    # （projectneko_server.exe --multiprocessing-fork，实测）
+    # 而本脚本常常以管理员提权运行。提权进程写出的文件/目录带 High IL，
+    # Low 进程随后 CREATE 新文件会被 ACCESS_DENIED 拒绝 —— 表现为面板「应用」
+    # 报 Errno 13、以及插件 startup 打补丁因备份失败而静默跳过。
+    #
+    # 读法：GetNamedSecurityInfoW(LABEL_SECURITY_INFORMATION) 取 SACL，
+    # 转 SDDL 后标签形如 S:(ML;;NW;;;LW) —— 末段 LW/ME/HI/SY 即级别。
+    if (-not ('NtsIntegrity' -as [type])) {
+        $ntsIlSrc = @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class NtsIntegrity {
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetNamedSecurityInfoW(
+        string name, int type, uint info,
+        IntPtr owner, IntPtr group, IntPtr dacl,
+        out IntPtr sacl, out IntPtr sd);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool ConvertSecurityDescriptorToStringSecurityDescriptorW(
+        IntPtr sd, uint rev, uint info, out IntPtr text, out uint textLen);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr LocalFree(IntPtr p);
+
+    public static string GetLabelSddl(string path) {
+        IntPtr sacl, sd;
+        uint rc = GetNamedSecurityInfoW(path, 1, 0x10, IntPtr.Zero, IntPtr.Zero,
+                                        IntPtr.Zero, out sacl, out sd);
+        if (rc != 0 || sd == IntPtr.Zero) { return "ERROR:" + rc; }
+        try {
+            IntPtr text;
+            uint len;
+            if (!ConvertSecurityDescriptorToStringSecurityDescriptorW(sd, 1, 0x10, out text, out len)) {
+                return "ERROR:convert";
+            }
+            try { return Marshal.PtrToStringUni(text); }
+            finally { LocalFree(text); }
+        }
+        finally { LocalFree(sd); }
+    }
+}
+'@
+        Add-Type -TypeDefinition $ntsIlSrc -ErrorAction Stop | Out-Null
+    }
+    try {
+        $sddl = [NtsIntegrity]::GetLabelSddl($Path)
+    } catch {
+        return ''
+    }
+    if ($sddl -match ';LW\)') { return 'Low' }
+    if ($sddl -match ';ME\)') { return 'Medium' }
+    if ($sddl -match ';HI\)') { return 'High' }
+    if ($sddl -match ';SY\)') { return 'System' }
+    return ''
+}
+
+function Set-NtsLowIntegrity([string]$Path) {
+    # 把目录树显式降到 Low IL（(OI)(CI) 继承），让 Low IL 的插件进程能创建/覆盖文件。
+    # 这是 no-op 安全操作：对象本来更高级别时修正为 Low；读取不受影响。
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    $current = Get-NtsIntegrityLabel $Path
+    if ($current -eq 'Low') { return $true }
+    $out = & icacls $Path /setintegritylevel '(OI)(CI)L' /T /C 2>&1
+    $failed = @($out | Where-Object {
+            # icacls 成功时也会打印 "Failed processing 0 files"，只统计非 0 的失败数
+            if ($_ -match 'Failed processing\s+(\d+)') { [int]$Matches[1] -gt 0 }
+            elseif ($_ -match '失败|拒绝|denied') { $true }
+            else { $false }
+        })
+    if ($failed.Count -gt 0) {
+        Write-Warn2 ("设置完整性级别失败（{0} 项）：{1}" -f $failed.Count, ($failed[0] -join ' '))
+    }
+    return ((Get-NtsIntegrityLabel $Path) -eq 'Low')
 }
 
 function Get-Sha256OfText([string]$Text) {
@@ -419,6 +553,265 @@ function Get-Short([string]$Text, [int]$Max = 400) {
 }
 
 # ---------------------------------------------------------------------------
+# 版本单调性 / 用户数据保命 / 失败回滚 辅助函数
+# ---------------------------------------------------------------------------
+function ConvertTo-NtsVersion([string]$Text) {
+    <#  把 "1.5.11" / "0.1.11-beta.1" 解析成 [version]（无法解析返回 $null）。
+        版本守卫只比较数字段，预发布后缀不参与比较。 #>
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+    $m = [regex]::Match($Text, '([0-9]+(?:\.[0-9]+){1,3})')
+    if (-not $m.Success) { return $null }
+    try { return [version]$m.Groups[1].Value } catch { return $null }
+}
+
+function Get-LoaderScriptVersion([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
+    try {
+        $text = [System.IO.File]::ReadAllText($Path)
+    } catch { return '' }
+    $m = [regex]::Match($text, "SCRIPT_VERSION\s*=\s*'([0-9]+(?:\.[0-9]+)*)'")
+    if ($m.Success) { return $m.Groups[1].Value }
+    return ''
+}
+
+function Get-TomlPackageVersion([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
+    try {
+        $text = [System.IO.File]::ReadAllText($Path)
+    } catch { return '' }
+    $m = [regex]::Match($text, '(?m)^\s*version\s*=\s*"([^"]+)"')
+    if ($m.Success) { return $m.Groups[1].Value }
+    return ''
+}
+
+function Test-NtsDowngrade([string]$TargetVersion, [string]$SourceVersion) {
+    <#  目标已安装版本严格大于源版本 → $true（表示「这次会是降级」）。 #>
+    $t = ConvertTo-NtsVersion $TargetVersion
+    $s = ConvertTo-NtsVersion $SourceVersion
+    if ($null -eq $t -or $null -eq $s) { return $false }
+    return ($t -gt $s)
+}
+
+function Get-ThemeVarCount([byte[]]$Bytes) {
+    <#  统计 theme.json 里的调色板变量数：vars + dark_vars 的键数（用户可见的是两者之和）。 #>
+    if ($null -eq $Bytes -or $Bytes.Length -eq 0) { return 0 }
+    try {
+        $text = [System.Text.Encoding]::UTF8.GetString($Bytes)
+        if ($text.Length -gt 0 -and $text[0] -eq [char]0xFEFF) { $text = $text.Substring(1) }
+        $obj = $text | ConvertFrom-Json
+    } catch { return 0 }
+    $count = 0
+    foreach ($name in @('vars', 'dark_vars')) {
+        $bag = $obj.PSObject.Properties[$name]
+        if ($bag -and $bag.Value) {
+            $count += @($bag.Value.PSObject.Properties).Count
+        }
+    }
+    return $count
+}
+
+function Copy-DirectoryContents {
+    <#  把 $Source 目录下的所有内容（含子目录）逐个复制进 $Destination，返回复制后的文件数。
+
+        为什么不能写成 Copy-Item -LiteralPath (Join-Path $Source '*')：
+        PowerShell 5.1 的 -LiteralPath 不展开通配符，这种写法既不抛异常、也不复制
+        任何文件（实测复制后目录里 0 个文件）。而调用方是用 Get-ChildItem 统计源
+        文件数的，于是日志会打印「已备份 N 个文件」，实际一个都没备 —— 升级时
+        用户的主题、背景图、导出一旦被清掉就再也找不回来。
+
+        逐文件复制还有个好处：某个文件被占用时错误会停在那一个文件上（-ErrorAction Stop），
+        调用方可以用返回值判断是否完整，而不是安静地半途而废。 #>
+    param(
+        [Parameter(Mandatory)][string] $Source,
+        [Parameter(Mandatory)][string] $Destination
+    )
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    $items = @(Get-ChildItem -LiteralPath $Source -Force -ErrorAction SilentlyContinue)
+    foreach ($item in $items) {
+        # 整项复制（目录会自动递归），不做相对路径运算：8.3 短名路径（TEMP 下的
+        # C:\Users\ADMINI~1\...）会让 Substring 切错位置，把文件塞进多出来的子目录里。
+        Copy-Item -LiteralPath $item.FullName -Destination $Destination -Recurse -Force -ErrorAction Stop
+    }
+    return @(Get-ChildItem -LiteralPath $Destination -Recurse -File -Force -ErrorAction SilentlyContinue).Count
+}
+
+function Backup-NtsUserData {
+    <#  把已安装插件里的全部用户数据备份到
+        %LOCALAPPDATA%\N.E.K.O\theme-studio-backup\userdata-<时间戳>\：
+          theme.json、schedule.json、themes\、backgrounds\、exports\
+        presets\ 不备份（随包内置只读，安装时用新包内容）。
+        返回对象供 Restore-NtsUserData 使用；失败直接抛异常（调用方按失败处理）。 #>
+    param(
+        [Parameter(Mandatory)][string] $PluginDir,
+        [Parameter(Mandatory)][string] $Stamp
+    )
+    $bakDir = Join-Path $UserDataBackupRoot ('userdata-' + $Stamp)
+    if (-not (Test-Path -LiteralPath $bakDir)) { New-Item -ItemType Directory -Force -Path $bakDir | Out-Null }
+
+    $data = [pscustomobject]@{
+        Dir             = $bakDir
+        ThemeBytes      = $null
+        ThemeVarCount   = 0
+        ThemeBakPath    = ''
+        # 「按时段自动换主题」的排程（v0.4.13）。与 theme.json 同级：都在 static\ 下、
+        # 都是用户数据。漏备份它，重装一次排程就没了，而用户完全看不出为什么。
+        ScheduleBytes   = $null
+        ScheduleBakPath = ''
+        ScheduleExists  = $false
+        SubDirs         = @{}
+        Counts          = @{}
+    }
+
+    $themeSrc = Join-Path $PluginDir 'static\theme.json'
+    if (Test-Path -LiteralPath $themeSrc -PathType Leaf) {
+        $bytes = [System.IO.File]::ReadAllBytes($themeSrc)
+        $themeBak = Join-Path $bakDir 'theme.json'
+        Write-BytesAtomic -Path $themeBak -Bytes $bytes
+        $data.ThemeBytes = $bytes
+        $data.ThemeVarCount = Get-ThemeVarCount $bytes
+        $data.ThemeBakPath = $themeBak
+        Write-Ok ("已备份用户调色板 → {0}（{1} 字节，{2} 个变量）" -f $themeBak, $bytes.Length, $data.ThemeVarCount)
+    } else {
+        Write-Info "已安装插件没有 static\theme.json（首次安装或插件未安装），无需备份调色板。"
+    }
+
+    $scheduleSrc = Join-Path $PluginDir 'static\schedule.json'
+    if (Test-Path -LiteralPath $scheduleSrc -PathType Leaf) {
+        $schedBytes = [System.IO.File]::ReadAllBytes($scheduleSrc)
+        $schedBak = Join-Path $bakDir 'schedule.json'
+        Write-BytesAtomic -Path $schedBak -Bytes $schedBytes
+        $data.ScheduleBytes = $schedBytes
+        $data.ScheduleBakPath = $schedBak
+        $data.ScheduleExists = $true
+        Write-Ok ("已备份自动换主题排程 → {0}（{1} 字节）" -f $schedBak, $schedBytes.Length)
+    } else {
+        Write-Info "已安装插件没有 static\schedule.json（没有设置过自动换主题），无需备份。"
+    }
+
+    foreach ($sub in @('themes', 'backgrounds', 'exports')) {
+        $srcDir = Join-Path $PluginDir ('static\' + $sub)
+        if (-not (Test-Path -LiteralPath $srcDir -PathType Container)) { continue }
+        $dstDir = Join-Path $bakDir $sub
+        $srcCount = @(Get-ChildItem -LiteralPath $srcDir -Recurse -File -Force -ErrorAction SilentlyContinue).Count
+        $copiedCount = Copy-DirectoryContents -Source $srcDir -Destination $dstDir
+        if ($copiedCount -ne $srcCount) {
+            # 备份不完整就中止：后面成功路径会删掉旧插件目录与历史备份，
+            # 一旦这里少拷一个文件，用户那套主题就永久没了。
+            throw ("备份用户数据 static\{0}\ 失败：源目录 {1} 个文件，备份后只有 {2} 个。已中止安装以免丢失。" -f $sub, $srcCount, $copiedCount)
+        }
+        $data.SubDirs[$sub] = $dstDir
+        $data.Counts[$sub] = $srcCount
+        Write-Ok ("已备份用户数据 static\{0}\ → {1}（{2} 个文件）" -f $sub, $dstDir, $srcCount)
+    }
+
+    $meta = [pscustomobject]@{
+        created_at      = (Get-Date).ToString('s')
+        source_plugin   = $PluginDir
+        theme_bytes     = $(if ($data.ThemeBytes) { $data.ThemeBytes.Length } else { 0 })
+        theme_vars      = $data.ThemeVarCount
+        has_schedule    = $data.ScheduleExists
+        subdir_files    = $data.Counts
+        app_root        = $AppRoot
+    }
+    $metaPath = Join-Path $bakDir 'meta.json'
+    Write-TextFilePreserving -Path $metaPath -Text (($meta | ConvertTo-Json -Depth 5) + "`n") -HasBom $false
+    return $data
+}
+
+function Restore-NtsUserData {
+    <#  把 Backup-NtsUserData 的产物写回目标插件目录（新复制出来的暂存目录）。
+        用户同名文件优先；presets\ 不动（用新包内置内容）。返回恢复的变量数。 #>
+    param(
+        [Parameter(Mandatory)][string] $PluginDir,
+        [Parameter(Mandatory)] $Data
+    )
+    if ($null -eq $Data) { return 0 }
+    $restoredVars = 0
+    if ($Data.ThemeBytes -and $Data.ThemeBytes.Length -gt 0) {
+        $dstTheme = Join-Path $PluginDir 'static\theme.json'
+        Write-BytesAtomic -Path $dstTheme -Bytes $Data.ThemeBytes
+        $restoredVars = Get-ThemeVarCount $Data.ThemeBytes
+    }
+    # 排程优先用备份；备份里没有就保持新包里的原样（首次安装时本来就没有）。
+    if ($Data.PSObject.Properties['ScheduleBytes'] -and $Data.ScheduleBytes -and $Data.ScheduleBytes.Length -gt 0) {
+        $dstSchedule = Join-Path $PluginDir 'static\schedule.json'
+        Write-BytesAtomic -Path $dstSchedule -Bytes $Data.ScheduleBytes
+        Write-Ok ("已恢复自动换主题排程 → {0}" -f $dstSchedule)
+    }
+    foreach ($sub in @('themes', 'backgrounds', 'exports')) {
+        if (-not $Data.SubDirs.ContainsKey($sub)) { continue }
+        $srcDir = $Data.SubDirs[$sub]
+        if (-not (Test-Path -LiteralPath $srcDir -PathType Container)) { continue }
+        $dstDir = Join-Path $PluginDir ('static\' + $sub)
+        $srcCount = @(Get-ChildItem -LiteralPath $srcDir -Recurse -File -Force -ErrorAction SilentlyContinue).Count
+        $copiedCount = Copy-DirectoryContents -Source $srcDir -Destination $dstDir
+        if ($copiedCount -lt $srcCount) {
+            # 恢复失败不该静默：用户数据已经在备份目录里（不会丢），但要让人知道他得手动补。
+            Write-Warn2 ("恢复用户数据 static\{0}\ 不完整：备份里有 {1} 个文件，只写回 {2} 个；备份仍在 {3}，可手动拷回。" -f $sub, $srcCount, $copiedCount, $srcDir)
+        }
+    }
+    return $restoredVars
+}
+
+function Invoke-NtsFailureRollback {
+    <#  终止性错误（throw / 未捕获异常）的统一回滚：
+        1) 模板：从 backup\txn-<时间戳>\ 快照逐个原子写回；
+        2) 插件目录：把「失败现场」改名成 failed-<时间戳> 保留，再把旧目录回滚点还原；
+        3) 用户数据：把 userdata-<时间戳>\ 备份写回当前插件目录。
+        任何一步失败只警告不抛异常（回滚过程中再抛异常会掩盖原始错误）。 #>
+    if ($script:NtsRollbackRunning) { return }
+    $script:NtsRollbackRunning = $true
+    $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
+    Write-Host ''
+    Write-Err2 '安装中止：开始回滚（模板 → 插件目录 → 用户数据）…'
+
+    foreach ($entry in @($script:TemplateTxnEntries)) {
+        try {
+            if (-not (Test-Path -LiteralPath $entry.Bak -PathType Leaf)) { continue }
+            $bytes = [System.IO.File]::ReadAllBytes($entry.Bak)
+            Write-BytesAtomic -Path $entry.Path -Bytes $bytes
+            Write-Ok ("模板已还原：{0}" -f (Split-Path -Leaf $entry.Path))
+        } catch {
+            Write-Err2 ("模板还原失败：{0} —— {1}" -f $entry.Path, $_.Exception.Message)
+        }
+    }
+
+    if ($script:PluginBakDir -and (Test-Path -LiteralPath $script:PluginBakDir)) {
+        $failedDir = Join-Path $PluginRollbackRoot ($PluginId + '.failed-' + $stamp)
+        if (Test-Path -LiteralPath $script:UserPluginDir) {
+            try {
+                Move-Item -LiteralPath $script:UserPluginDir -Destination $failedDir -Force -ErrorAction Stop
+                Write-Ok ("失败现场已保留：{0}" -f $failedDir)
+            } catch {
+                Write-Warn2 ("失败现场改名失败（{0}），直接覆盖删除：{1}" -f $_.Exception.Message, $script:UserPluginDir)
+                Remove-Item -LiteralPath $script:UserPluginDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+        try {
+            Move-Item -LiteralPath $script:PluginBakDir -Destination $script:UserPluginDir -Force -ErrorAction Stop
+            Write-Ok ("旧插件目录已还原：{0}" -f $script:UserPluginDir)
+        } catch {
+            Write-Err2 ("旧插件目录还原失败（{0}）。回滚备份仍在：{1}" -f $_.Exception.Message, $script:PluginBakDir)
+        }
+    }
+
+    if ($script:UserDataBackup -and (Test-Path -LiteralPath $script:UserPluginDir)) {
+        try {
+            $n = Restore-NtsUserData -PluginDir $script:UserPluginDir -Data $script:UserDataBackup
+            Write-Ok ("用户数据已还原到插件目录（{0} 个调色板变量）" -f $n)
+        } catch {
+            Write-Err2 ("用户数据还原失败：{0}。备份仍在：{1}" -f $_.Exception.Message, $script:UserDataBackup.Dir)
+        }
+    }
+
+    Write-Host ''
+    Write-Host '  回滚完成。以下备份全部保留，供取证/手工恢复：' -ForegroundColor Yellow
+    if ($script:TemplateTxnDir) { Write-Host ("    模板事务快照：{0}" -f $script:TemplateTxnDir) -ForegroundColor Gray }
+    if ($script:PluginBakDir)   { Write-Host ("    旧插件目录：{0}" -f $script:PluginBakDir) -ForegroundColor Gray }
+    if ($script:UserDataBackup) { Write-Host ("    用户数据：{0}" -f $script:UserDataBackup.Dir) -ForegroundColor Gray }
+}
+
+# ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
 $StartedAt = Get-Date
@@ -446,7 +839,16 @@ $AppRoot     = $AppRoot.TrimEnd('\')
 if (-not (Test-Path -LiteralPath (Join-Path $AppRoot 'resources\bin\templates'))) {
     throw ("-AppRoot 指向的目录不是 N.E.K.O 安装根：'{0}' 下没有 resources\bin\templates。请用 -AppRoot 指定正确路径。" -f $AppRoot)
 }
-$ThemeRoot   = Join-Path $AppRoot 'theme-studio'
+if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
+    $scriptRepo = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { '' } else { $PSScriptRoot }
+    if ($scriptRepo -and (Test-Path -LiteralPath (Join-Path $scriptRepo 'plugin\plugin.toml'))) {
+        $RepoRoot = $scriptRepo
+    } else {
+        $RepoRoot = Join-Path $AppRoot 'theme-studio'
+    }
+}
+$RepoRoot    = $RepoRoot.TrimEnd('\')
+$ThemeRoot   = $RepoRoot
 $BackupDir   = Join-Path $ThemeRoot 'backup'
 $TemplateDir = Join-Path $AppRoot 'resources\bin\templates'
 $StaticDir   = Join-Path $AppRoot 'resources\bin\static'
@@ -470,8 +872,20 @@ $LockFilePath     = Join-Path $NekoDataDir 'plugins.lock.json'
 $LogDir           = Join-Path $NekoDataDir 'logs'
 $PackagePath      = Join-Path $PackageDir $PackageFileName
 $PluginSrc        = Join-Path $ThemeRoot 'plugin'
-$AssetCssSrc      = Join-Path $ThemeRoot 'app\css\neko-theme-studio.css'
-$AssetJsSrc       = Join-Path $ThemeRoot 'app\neko-theme-studio.js'
+# 两件套的**唯一源**是插件自带的 plugin\static\loader\（插件自愈用的也是这份）。
+# 旧版读的是仓库根的 app\ 镜像，而 tools/package-dist.ps1 一直把 app\ 排除在发布包外
+# —— 于是「按文档解压安装包再跑 install.ps1」时源文件不存在，哈希算不出来、标记里
+# 没有 -<hash8>，G 段必然失败（模板已被改、资源一件没部署、退出码红）。模板已常驻。
+$AssetCssSrc      = Join-Path $ThemeRoot 'plugin\static\loader\neko-theme-studio.css'
+$AssetJsSrc       = Join-Path $ThemeRoot 'plugin\static\loader\neko-theme-studio.js'
+foreach ($assetCheck in @(
+        [pscustomobject]@{ Label = 'CSS'; Path = $AssetCssSrc },
+        [pscustomobject]@{ Label = 'JS';  Path = $AssetJsSrc })) {
+    if (-not (Test-Path -LiteralPath $assetCheck.Path -PathType Leaf)) {
+        # 在任何写操作之前失败：否则会留下「模板改了、资源没部署」的半成品。
+        throw ("缺少 loader 源文件（{0}）：{1}。发布包必须包含 plugin\static\loader\ 两件套。" -f $assetCheck.Label, $assetCheck.Path)
+    }
+}
 $AssetCssDst      = Join-Path $StaticDir $AssetCssRel
 $AssetJsDst       = Join-Path $StaticDir $AssetJsRel
 $TplIndex         = Join-Path $TemplateDir 'index.html'
@@ -499,6 +913,20 @@ $DisableFlag = if ($env:NEKO_NTS_DISABLE_FILE) { $env:NEKO_NTS_DISABLE_FILE } el
 # 备份到这里、装完写回；否则全量重建插件目录会把用户辛苦调的颜色重置成出厂默认。
 $UserThemeBak = Join-Path $BackupDir 'user-theme.json'
 $UserThemeSrc = Join-Path $PluginSrc 'static\theme.json'
+
+# 用户数据（调色板 + themes/backgrounds/exports）的备份根。
+# 与插件自愈/官方备份共用 %LOCALAPPDATA%\N.E.K.O\theme-studio-backup\，
+# 每次安装一个 userdata-<时间戳>\ 子目录，失败时整份还原、成功后才清理旧备份。
+$UserDataBackupRoot = Join-Path $NekoDataDir 'theme-studio-backup'
+
+# 本次安装的运行时状态（失败回滚用）。-Verify 模式只读，这些变量保持空值。
+$script:TemplateTxnDir     = $null
+$script:TemplateTxnEntries = New-Object System.Collections.Generic.List[object]
+$script:PluginBakDir       = $null
+$script:UserDataBackup     = $null
+$script:UserThemeRestoredVars = 0
+$script:NtsRollbackRunning = $false
+$script:PriorRollbackDirs  = New-Object System.Collections.Generic.List[string]
 
 # ---------------------------------------------------------------------------
 # A. 环境检查
@@ -530,6 +958,23 @@ if (Test-Path -LiteralPath $srvPath) { Write-Info "服务端：$srvPath" } else 
 
 # 契约 §9 硬规则自检：确认我们从不触碰它们
 Write-Info "硬约束：本脚本不读写 resources\app.asar 与 projectneko_server.exe（契约 §9）"
+
+# 提权检测：写 <AppRoot>\resources\bin 在受保护目录（Program Files 等）需要管理员。
+# 不静默继续：明确提示用户可能失败以及怎么处理，但仍继续尝试（有些安装目录是用户可写的）。
+$IsAdmin = $false
+try {
+    $wi = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+    $wp = New-Object System.Security.Principal.WindowsPrincipal($wi)
+    $IsAdmin = $wp.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+} catch { $IsAdmin = $false }
+if (-not $IsAdmin) {
+    Write-Warn2 '当前不是管理员：写入 resources\bin\static 或模板目录可能被系统拒绝（Access denied）。'
+    Write-Warn2 '  建议：以「管理员身份运行 PowerShell」，再执行 powershell -NoProfile -File install.ps1'
+    Write-Warn2 '  若安装根在用户可写目录（如 D:\be），可忽略本提示；脚本会继续，失败时优先怀疑权限。'
+    Add-Warning '非管理员运行：若写入 resources\bin / templates 失败，请改用管理员 PowerShell 重跑。'
+} else {
+    Write-Info '提权检查：当前已是管理员，写入 resources\bin 不受权限限制。'
+}
 
 $p48911 = Test-TcpPort -Port $AppPort
 $p48916 = Test-TcpPort -Port $PluginPort
@@ -570,6 +1015,37 @@ function Get-VerificationTemplateTargets {
     return $list.ToArray()
 }
 
+function Wait-NtsTemplatePropagation {
+    <#  等插件自愈把页面标记补齐。
+
+        背景：D 段只同步写 chat/index 两个模板；其余 20+ 个窗口由插件 startup 的
+        **异步线程**补（POST /plugin/<id>/start 立刻返回 queued，真正打标记发生在
+        daemon 线程里）。旧版 F7 一启动完就进 G，于是纯净宿主机首装必然报几十项
+        「找不到 NTS:BEGIN」并以 exit 1 收场 —— 而作者本机 23 个模板早就有标记，
+        所以这个缺陷在开发机上永远看不到。
+
+        这里主动等：每 0.7 秒扫一次磁盘，最多 $TimeoutSeconds 秒。  #>
+    param(
+        [Parameter(Mandatory)][object[]]$Targets,
+        [int]$TimeoutSeconds = 45
+    )
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ($true) {
+        $missing = @()
+        foreach ($t in $Targets) {
+            try { $pr = Get-TextFileProbe -Path $t.Path } catch { $missing += $t.Name; continue }
+            $c = Get-NtsMarkerCounts -Text $pr.Text
+            $ok = ($c.Begin -eq 1 -and $c.End -eq 1 -and
+                   $pr.Text.Contains($JinjaSentinel + '-' + $AssetCssHash8) -and
+                   $pr.Text.Contains($JinjaSentinel + '-' + $AssetJsHash8))
+            if (-not $ok) { $missing += $t.Name }
+        }
+        if ($missing.Count -eq 0) { return [pscustomobject]@{ Ok = $true; Missing = @() } }
+        if ((Get-Date) -ge $deadline) { return [pscustomobject]@{ Ok = $false; Missing = $missing } }
+        Start-Sleep -Milliseconds 700
+    }
+}
+
 function Invoke-Verification {
     Write-Head 'G. 验证'
 
@@ -596,6 +1072,42 @@ function Invoke-Verification {
                      $pr.Text.Contains($JinjaSentinel + '-' + $AssetJsHash8))
         $pass = ($markersOk -and $jinjaOk -and $hashedOk)
         Add-Result ("模板 {0}" -f $t.Name) $pass ("BEGIN/END={0}/{1}；Jinja={2}；资源哈希={3}" -f $c.Begin, $c.End, $jinjaOk, $hashedOk)
+    }
+
+    # G2b 用户调色板：安装时从 userdata-<时间戳>\ 写回，这里把恢复结果显式报告出来
+    # （旧版只备份不读回，用户重装后颜色被重置且脚本一声不吭）。
+    if ($script:UserDataBackup -and $script:UserDataBackup.ThemeBytes) {
+        Write-Ok ("已恢复用户调色板 {0} 个变量" -f $script:UserThemeRestoredVars)
+        Add-Result '用户调色板已恢复' $true ("{0} 个变量（备份：{1}）" -f $script:UserThemeRestoredVars, $script:UserDataBackup.Dir)
+    } elseif ($Verify) {
+        # -Verify 是只读模式：不改文件，但把当前已安装插件的调色板变量数打出来便于比对
+        $installedThemePath = Join-Path (Join-Path $UserPluginsRoot $PluginId) 'static\theme.json'
+        if (Test-Path -LiteralPath $installedThemePath -PathType Leaf) {
+            try {
+                $tb = [System.IO.File]::ReadAllBytes($installedThemePath)
+                $n = Get-ThemeVarCount $tb
+                Write-Info ("已安装调色板：{0} 个变量（只读检查，未改动）" -f $n)
+            } catch {
+                Write-Info ("已安装调色板读取失败：{0}" -f $_.Exception.Message)
+            }
+        }
+    }
+
+    # G2c 完整性级别：插件子进程以 Low IL 运行，插件目录/备份目录必须是 Low。
+    #     否则面板「应用」写 theme.json 会 PermissionError（Errno 13），
+    #     插件 startup 也会因为写不了模板备份而静默跳过补丁。
+    foreach ($ilItem in @(
+            [pscustomobject]@{ Name = '插件目录完整性级别'; Path = $UserPluginDir;       Need = 'Low' },
+            [pscustomobject]@{ Name = '备份目录完整性级别'; Path = $UserDataBackupRoot; Need = 'Low' })) {
+        if (-not (Test-Path -LiteralPath $ilItem.Path)) {
+            if ($ilItem.Name -eq '插件目录完整性级别') {
+                Add-Result $ilItem.Name $false ("目录不存在：{0}" -f $ilItem.Path)
+            }
+            continue   # 备份目录可能尚未创建（首次安装且无用户数据），不算失败
+        }
+        $il = Get-NtsIntegrityLabel $ilItem.Path
+        $shown = if ($il) { $il } else { '未设置/继承' }
+        Add-Result $ilItem.Name ($il -eq $ilItem.Need) ("当前 {0}（需要 {1}）" -f $shown, $ilItem.Need)
     }
 
     # G3/G4 静态文件 HTTP 200
@@ -696,6 +1208,27 @@ if ($Verify) {
 }
 
 # ---------------------------------------------------------------------------
+# 失败回滚陷阱：任何未捕获的终止性错误（throw）都先回滚再退出
+# ---------------------------------------------------------------------------
+# 回滚范围：模板（txn 快照）→ 插件目录（旧回滚点）→ 用户数据（userdata 备份）。
+# 这样「模板写了一半」「插件目录被改名后构建失败」都不会把用户留在半成品状态。
+trap {
+    $err = $_
+    Write-Host ''
+    Write-Err2 ("安装异常：{0}" -f $err.Exception.Message)
+    try {
+        $stack = (@($err.ScriptStackTrace -split "`n") | Select-Object -First 3) -join ' / '
+        if ($stack) { Write-Host ("  位置：{0}" -f $stack) -ForegroundColor DarkGray }
+    } catch { }
+    try {
+        Invoke-NtsFailureRollback
+    } catch {
+        Write-Err2 ("回滚过程异常：{0}（请手工检查上面的备份目录）" -f $_.Exception.Message)
+    }
+    exit 1
+}
+
+# ---------------------------------------------------------------------------
 # B. 备份
 # ---------------------------------------------------------------------------
 Write-Head 'B. 备份模板'
@@ -738,7 +1271,7 @@ foreach ($t in $TplTargets) {
         app_root        = $AppRoot
         installed_by    = 'install.ps1'
     }
-    $meta | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath ($bakPath + '.meta.json') -Encoding UTF8
+    Write-TextFilePreserving -Path ($bakPath + '.meta.json') -Text (($meta | ConvertTo-Json -Depth 4) + "`n") -HasBom $false
 
     Add-Change ("备份 {0} → {1}（{2} 字节，哈希 {3}）" -f $t.Name, (Split-Path $bakPath -Leaf), $bakLen, $shortHash)
 }
@@ -767,6 +1300,23 @@ foreach ($pair in @(
 
     $dstDir = Split-Path -Parent $pair.Dst
     if (-not (Test-Path -LiteralPath $dstDir)) { New-Item -ItemType Directory -Force -Path $dstDir | Out-Null }
+
+    # 版本单调性守卫（只有 loader JS 带 SCRIPT_VERSION；CSS 没有版本号）。
+    # 目的：把旧包装到已经装了新版本的机器上时，不要静默把它降级。
+    if ($pair.Label -eq 'JS' -and (Test-Path -LiteralPath $pair.Dst -PathType Leaf)) {
+        $srcVer = Get-LoaderScriptVersion $pair.Src
+        $dstVer = Get-LoaderScriptVersion $pair.Dst
+        if (Test-NtsDowngrade -TargetVersion $dstVer -SourceVersion $srcVer) {
+            if (-not $ForceDowngrade) {
+                Write-Warn2 ("已部署 loader 版本 v{0} 高于源版本 v{1}：已跳过覆盖（防止降级）。" -f $dstVer, $srcVer)
+                Write-Warn2 "  如确实要用旧包覆盖，请加 -ForceDowngrade 重跑。"
+                Add-Warning ("loader 版本守卫：已部署 v{0} > 源 v{1}，跳过覆盖（需要降级请加 -ForceDowngrade）。" -f $dstVer, $srcVer)
+                continue
+            }
+            Write-Warn2 ("-ForceDowngrade：允许把 loader 从 v{0} 降级到 v{1}。" -f $dstVer, $srcVer)
+            Add-Warning ("loader 被强制降级：v{0} → v{1}（-ForceDowngrade）" -f $dstVer, $srcVer)
+        }
+    }
 
     $srcLen = (Get-Item -LiteralPath $pair.Src).Length
     $srcHash = (Get-FileHash -LiteralPath $pair.Src -Algorithm SHA256).Hash
@@ -865,6 +1415,32 @@ if ($preflightProblems.Count -gt 0) {
     throw ("模板预检失败（{0} 项），已中止：没有写入任何模板文件。" -f $preflightProblems.Count)
 }
 
+# D-txn：写模板前先给每个目标模板做事务快照（当前字节 → backup\txn-<时间戳>\<name>.orig）。
+# 任何一个模板写失败 / 写后复核失败 → Invoke-NtsFailureRollback 用这些快照全部还原。
+if ($patchPlans.Count -gt 0) {
+    $txnDir = Join-Path $BackupDir ('txn-' + $backupStamp)
+    New-Item -ItemType Directory -Force -Path $txnDir | Out-Null
+    $script:TemplateTxnDir = $txnDir
+    foreach ($plan in $patchPlans) {
+        $orig = Join-Path $txnDir ($plan.Target.Name + '.orig')
+        $origBytes = [System.IO.File]::ReadAllBytes($plan.Target.Path)
+        Write-BytesAtomic -Path $orig -Bytes $origBytes
+        $script:TemplateTxnEntries.Add([pscustomobject]@{
+            Name = $plan.Target.Name
+            Path = $plan.Target.Path
+            Bak  = $orig
+            Sha256 = (Get-Sha256OfBytes $origBytes)
+        }) | Out-Null
+    }
+    $txnMeta = [pscustomobject]@{
+        created_at = (Get-Date).ToString('s')
+        app_root   = $AppRoot
+        files      = @($script:TemplateTxnEntries | ForEach-Object { [pscustomobject]@{ name = $_.Name; path = $_.Path; sha256 = $_.Sha256 } })
+    }
+    Write-TextFilePreserving -Path (Join-Path $txnDir 'meta.json') -Text (($txnMeta | ConvertTo-Json -Depth 5) + "`n") -HasBom $false
+    Write-Ok ("模板事务快照：{0}（{1} 个文件）" -f $txnDir, $script:TemplateTxnEntries.Count)
+}
+
 foreach ($plan in $patchPlans) {
     $t = $plan.Target
     $pr = $plan.Probe
@@ -915,6 +1491,7 @@ Write-Head 'E. 复制插件开发源到构建暂存目录'
 $pluginStaged = $false
 $pluginBakDir = $null
 $userThemeData = $null
+$pluginVersionBlocked = $false
 
 if ($SkipPluginInstall) {
     Write-Info '指定了 -SkipPluginInstall：跳过插件复制/构建/安装。'
@@ -925,6 +1502,26 @@ elseif (-not (Test-Path -LiteralPath $PluginSrc)) {
     Add-Warning $msg
 }
 else {
+    # E0. 插件包版本单调性守卫：已安装版本 > 源版本时默认跳过重建（防止旧包降级）。
+    $installedToml = Join-Path $UserPluginDir 'plugin.toml'
+    $installedVer = Get-TomlPackageVersion $installedToml
+    $sourceVer = Get-TomlPackageVersion (Join-Path $PluginSrc 'plugin.toml')
+    if (Test-NtsDowngrade -TargetVersion $installedVer -SourceVersion $sourceVer) {
+        if (-not $ForceDowngrade) {
+            $pluginVersionBlocked = $true
+            Write-Warn2 ("已安装插件版本 v{0} 高于源版本 v{1}：跳过插件重建（防止降级）。" -f $installedVer, $sourceVer)
+            Write-Warn2 "  应用侧两件套与模板补丁仍会更新；如确需降级插件，请加 -ForceDowngrade 重跑。"
+            Add-Warning ("插件版本守卫：已安装 v{0} > 源 v{1}，跳过插件重建（需要降级请加 -ForceDowngrade）。" -f $installedVer, $sourceVer)
+        } else {
+            Write-Warn2 ("-ForceDowngrade：允许插件从 v{0} 降级到 v{1}。" -f $installedVer, $sourceVer)
+            Add-Warning ("插件被强制降级：v{0} → v{1}（-ForceDowngrade）" -f $installedVer, $sourceVer)
+        }
+    }
+
+    if ($pluginVersionBlocked) {
+        Write-Info '插件重建已跳过；旧插件目录保持原样，F6b/F7 只做运行态与收尾。'
+    }
+    else {
     # E1. 旧插件目录不直接删除：先改名成 <id>.bak 作为回滚点。
     #     目录里的 static\theme.json 是用户的调色板数据（不在源码里），必须先备份出来，
     #     否则「重跑一次安装」就会把用户颜色重置回出厂默认（旧版 bug）。
@@ -946,27 +1543,34 @@ else {
     if (Test-Path -LiteralPath $UserPluginDir) {
         $pluginBakDir = Join-Path $PluginRollbackRoot $PluginId
         if (-not (Test-Path -LiteralPath $PluginRollbackRoot)) { New-Item -ItemType Directory -Force -Path $PluginRollbackRoot | Out-Null }
+        # E1'. 上一次的回滚点不直接删除：改名成 prior-<时间戳> 保留。
+        # 新规则：旧回滚点只在新安装 + 验证全部成功后才清（失败时新旧两份都留着）。
         if (Test-Path -LiteralPath $pluginBakDir) {
-            Remove-Item -LiteralPath $pluginBakDir -Recurse -Force -ErrorAction SilentlyContinue
-            if (Test-Path -LiteralPath $pluginBakDir) {
-                Add-Warning "无法清理上一次遗留的回滚目录：$pluginBakDir（可能有进程占用），将继续使用新的复制流程。"
-                $pluginBakDir = $null
+            $priorDir = Join-Path $PluginRollbackRoot ('prior-' + $PluginId + '-' + $backupStamp)
+            try {
+                Move-Item -LiteralPath $pluginBakDir -Destination $priorDir -Force -ErrorAction Stop
+                [void]$script:PriorRollbackDirs.Add($priorDir)
+                Write-Info ("上一次的回滚点已保留为：{0}" -f $priorDir)
+            } catch {
+                Add-Warning ("上一次的回滚点无法改名（{0}），尝试直接删除：{1}" -f $_.Exception.Message, $pluginBakDir)
+                Remove-Item -LiteralPath $pluginBakDir -Recurse -Force -ErrorAction SilentlyContinue
+                if (Test-Path -LiteralPath $pluginBakDir) {
+                    Add-Warning "无法清理上一次遗留的回滚目录：$pluginBakDir（可能有进程占用），将继续使用新的复制流程。"
+                    $pluginBakDir = $null
+                }
             }
         }
-        $installedTheme = Join-Path $UserPluginDir 'static\theme.json'
-        if (Test-Path -LiteralPath $installedTheme) {
-            $instThemeBytes = [System.IO.File]::ReadAllBytes($installedTheme)
-            $instThemeHash = Get-Sha256OfBytes $instThemeBytes
-            $srcThemeHash = ''
-            if (Test-Path -LiteralPath $UserThemeSrc) { $srcThemeHash = (Get-FileHash -LiteralPath $UserThemeSrc -Algorithm SHA256).Hash.ToLowerInvariant() }
-            if ($instThemeHash -ne $srcThemeHash) {
-                if (-not (Test-Path -LiteralPath $BackupDir)) { New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null }
-                [System.IO.File]::WriteAllBytes($UserThemeBak, $instThemeBytes)
-                $userThemeData = $instThemeBytes
-                Add-Change ("已备份用户主题数据（调色板）→ {0}（{1} 字节）" -f $UserThemeBak, $instThemeBytes.Length)
-            } else {
-                Write-Info '已安装插件的 theme.json 与出厂默认一致，无需额外保留。'
-            }
+
+        $script:PluginBakDir = $pluginBakDir
+
+        # E1b. 全部用户数据备份：static\theme.json + static\themes\ + backgrounds\ + exports\。
+        # 旧版只备份 theme.json，用户自建/下载的 themes、背景图、导出包在重装时会被整目录覆盖丢掉。
+        $script:UserDataBackup = Backup-NtsUserData -PluginDir $UserPluginDir -Stamp $backupStamp
+        $userThemeData = $script:UserDataBackup.ThemeBytes
+        if ($userThemeData) {
+            Write-BytesAtomic -Path $UserThemeBak -Bytes $userThemeData
+            $script:UserThemeRestoredVars = $script:UserDataBackup.ThemeVarCount
+            Add-Change ("已备份用户主题数据（调色板 {0} 个变量）→ {1}" -f $script:UserThemeRestoredVars, $script:UserDataBackup.Dir)
         }
         if ($pluginBakDir) {
             $moved = $false
@@ -1006,13 +1610,19 @@ else {
         Copy-Item -LiteralPath $f.FullName -Destination $dst -Force
     }
 
-    # E2b. 把用户的调色板写回暂存目录（必须发生在 build 之前，否则打出来的包是出厂默认值）
-    if ($null -ne $userThemeData) {
-        $stagedTheme = Join-Path $UserPluginDir 'static\theme.json'
-        $stagedThemeDir = Split-Path -Parent $stagedTheme
-        if (-not (Test-Path -LiteralPath $stagedThemeDir)) { New-Item -ItemType Directory -Force -Path $stagedThemeDir | Out-Null }
-        [System.IO.File]::WriteAllBytes($stagedTheme, $userThemeData)
-        Add-Change ("已保留用户主题数据（写回 {0}，{1} 字节）" -f $stagedTheme, $userThemeData.Length)
+    # E2b. 把全部用户数据写回暂存目录（必须发生在 build 之前，否则打出来的包是出厂默认值）。
+    #      static\presets\ 不还原：那是随包内置的只读预设，用新包内容；
+    #      用户自定义的同名预设请放在 static\themes\ 里（会原样保留）。
+    if ($null -ne $script:UserDataBackup) {
+        $script:UserThemeRestoredVars = Restore-NtsUserData -PluginDir $UserPluginDir -Data $script:UserDataBackup
+        if ($userThemeData) {
+            Add-Change ("已恢复用户调色板 {0} 个变量（写回 {1}）" -f $script:UserThemeRestoredVars, (Join-Path $UserPluginDir 'static\theme.json'))
+        }
+        foreach ($sub in @('themes', 'backgrounds', 'exports')) {
+            if ($script:UserDataBackup.SubDirs.ContainsKey($sub)) {
+                Add-Change ("已恢复用户数据 static\{0}\（{1} 个文件）" -f $sub, $script:UserDataBackup.Counts[$sub])
+            }
+        }
     }
 
     # E3. 自检：暂存目录必须有 plugin.toml，且不能带 BOM（带 BOM 会让 build 报
@@ -1023,16 +1633,16 @@ else {
     } else {
         $tomlBytes = [System.IO.File]::ReadAllBytes($stagedToml)
         if ($tomlBytes.Length -ge 3 -and $tomlBytes[0] -eq 0xEF -and $tomlBytes[1] -eq 0xBB -and $tomlBytes[2] -eq 0xBF) {
-            # 去掉 BOM 后原样写回（契约 §8 / 实测）
+            # 去掉 BOM 后原样写回（契约 §8 / 实测）；原子写避免构建方读到半截 toml
             $noBom = [System.Text.Encoding]::UTF8.GetString($tomlBytes, 3, $tomlBytes.Length - 3)
-            # 注意：临时措施——源仓库里的 plugin.toml 不该带 BOM，这里只修副本
-            $tmp = Join-Path $UserPluginDir 'plugin.toml'
-            [System.IO.File]::WriteAllText($tmp, $noBom, (New-Object System.Text.UTF8Encoding($false)))
+            $noBomBytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($noBom)
+            Write-BytesAtomic -Path $stagedToml -Bytes $noBomBytes
             Add-Change "插件暂存 plugin.toml 含 UTF-8 BOM（会导致构建失败），已去除 BOM"
         }
         Add-Change ("插件源：已同步 {0} 个文件 → {1}" -f $srcFiles.Count, $UserPluginDir)
         $pluginStaged = $true
     }
+    }   # end: if (-not $pluginVersionBlocked)
 }
 
 # ---------------------------------------------------------------------------
@@ -1041,7 +1651,7 @@ else {
 # F6b 收尾要用：插件是否真正装成功（决定删除还是还原 .bak 回滚点）
 $pluginInstallOk = $false
 
-if (-not $SkipPluginInstall) {
+if (-not $SkipPluginInstall -and -not $pluginVersionBlocked) {
     Write-Head 'F. 构建并安装插件（48916 plugin-cli）'
 
     $havePluginSrc = $pluginStaged -and (Test-Path -LiteralPath $UserPluginDir)
@@ -1184,33 +1794,34 @@ if (-not $SkipPluginInstall) {
 }
 
 # ---------------------------------------------------------------------------
-# F6b. 收尾：回滚点处理 + 清除「停止自愈」标记
+# F6b. 收尾：回滚点处理（只在失败时还原；删除留到验证通过后的清理段）
 # ---------------------------------------------------------------------------
 # 旧版先删插件目录再装，构建/安装失败时只留警告，用户会从「插件可用」变成「目录是半成品」。
-# 现在旧目录在 E 步只改名成 <id>.bak：装成功才删，装失败（或根本没跑到 F4）就还原回去。
+# 现在旧目录在 E 步只改名成回滚点：**成功不在这里删**（要等 G 验证全部通过），
+# 失败（或根本没跑到 F4）才把旧目录还原；还原前先把「失败现场」改名保留，
+# 于是失败时磁盘上同时有「失败现场」与「旧目录」两份回滚点。
 
-if (-not $SkipPluginInstall) {
-    if ($pluginBakDir -and (Test-Path -LiteralPath $pluginBakDir)) {
-        if ($pluginInstallOk) {
-            Remove-Item -LiteralPath $pluginBakDir -Recurse -Force -ErrorAction SilentlyContinue
-            if (Test-Path -LiteralPath $pluginBakDir) {
-                Add-Warning ("插件安装成功，但旧插件目录回滚点删除失败：$pluginBakDir（可手动删除）")
-            } else {
-                Write-Ok ("插件安装成功，已删除旧插件目录回滚点：$pluginBakDir")
-            }
-        } else {
-            if (Test-Path -LiteralPath $UserPluginDir) {
+if (-not $SkipPluginInstall -and $pluginBakDir -and (Test-Path -LiteralPath $pluginBakDir)) {
+    if ($pluginInstallOk) {
+        Write-Info ("插件安装成功：旧插件目录回滚点暂留到验证通过后再清理：{0}" -f $pluginBakDir)
+    } else {
+        if (Test-Path -LiteralPath $UserPluginDir) {
+            $failedDir = Join-Path $PluginRollbackRoot ($PluginId + '.failed-' + (Get-Date).ToString('yyyyMMdd-HHmmss'))
+            try {
+                Move-Item -LiteralPath $UserPluginDir -Destination $failedDir -Force -ErrorAction Stop
+                Add-Warning ("插件未安装成功：失败现场已保留：{0}" -f $failedDir)
+            } catch {
+                Add-Warning ("插件未安装成功：失败现场改名失败（{0}），将直接覆盖删除：{1}" -f $_.Exception.Message, $UserPluginDir)
                 Remove-Item -LiteralPath $UserPluginDir -Recurse -Force -ErrorAction SilentlyContinue
             }
-            try {
-                Move-Item -LiteralPath $pluginBakDir -Destination $UserPluginDir -Force -ErrorAction Stop
-                Add-Warning ("插件未安装成功，已把旧插件目录还原：$UserPluginDir（请检查上面的失败原因后重跑）")
-            } catch {
-                Add-Warning ("插件未安装成功，且旧插件目录还原失败（{0}）。回滚备份仍在：{1}" -f $_.Exception.Message, $pluginBakDir)
-            }
+        }
+        try {
+            Move-Item -LiteralPath $pluginBakDir -Destination $UserPluginDir -Force -ErrorAction Stop
+            Add-Warning ("插件未安装成功，已把旧插件目录还原：$UserPluginDir（请检查上面的失败原因后重跑）")
+        } catch {
+            Add-Warning ("插件未安装成功，且旧插件目录还原失败（{0}）。回滚备份仍在：{1}" -f $_.Exception.Message, $pluginBakDir)
         }
     }
-
 }
 
 # 「停止自愈」标记：uninstall.ps1 写、这里删。存在时插件 startup 会整体跳过自愈，
@@ -1324,9 +1935,72 @@ if ($p48916) {
                 Add-Warning ("插件启动失败：HTTP {0} {1}。面板可以打开，但「应用」会报 NOT_READY。" -f $st.StatusCode, (Get-Short $st.Body 300))
             }
         }
+
+        # F7c：等插件异步自愈把全部页面的标记补齐，再交给 G 段验证。
+        # 插件没起来就别等（只会白等 45 秒，G 会给出真正的原因）。
+        if ($started -or $curStatus -eq 'running') {
+            $propTargets = @(Get-VerificationTemplateTargets)
+            if ($propTargets.Count -gt 0) {
+                Write-Info ("等待插件自愈补齐页面标记（{0} 个目标，最多 45 秒）…" -f $propTargets.Count)
+                $prop = Wait-NtsTemplatePropagation -Targets $propTargets -TimeoutSeconds 45
+                if ($prop.Ok) {
+                    Write-Ok ("插件自愈已补齐全部 {0} 个页面" -f $propTargets.Count)
+                    Add-Change ("插件自愈补齐页面标记：{0} 个" -f $propTargets.Count)
+                } else {
+                    $names = (@($prop.Missing) | Select-Object -First 6) -join '、'
+                    Write-Warn2 ("等了 45 秒，还有 {0} 个页面没有新标记：{1}" -f @($prop.Missing).Count, $names)
+                    Add-Warning ("模板补丁未在 45 秒内补齐（{0} 个页面）：G 段会因此失败。插件起来后可重跑 install.ps1 -Verify。" -f @($prop.Missing).Count)
+                }
+            }
+        }
     }
 } else {
     Write-Info ("端口 {0}（插件服务）未监听，跳过 F7 运行态检查。" -f $PluginPort)
+}
+
+# ---------------------------------------------------------------------------
+# F8. 修正插件目录完整性级别（Low）—— 让插件进程真的能写自己的数据
+# ---------------------------------------------------------------------------
+#   根因（实测 2026-11-18，v0.1.11 验收时发现）：N.E.K.O 的插件子进程以
+#   **Low IL** 运行（projectneko_server.exe --multiprocessing-fork，token 完整性
+#   级别 Low），而本脚本通常提权运行。提权进程写出的目录/文件带 High IL，Low 进程
+#   往里 CREATE 新文件就是 ACCESS_DENIED：
+#     - 面板「应用」→ 【Errno 13】...\static\.theme.json.<pid>.<tid>.tmp
+#     - 插件 startup 打补丁 → 备份目录不可写，21 个模板静默放弃
+#   把插件安装目录与备份目录显式降到 Low（继承），Low 进程即可创建文件，
+#   而高 IL 进程读 Low 对象不受影响（读方向不受限）。
+if (Test-Path -LiteralPath $UserPluginDir) {
+    Write-Head 'F8. 修正插件目录完整性级别（Low IL 才有写权限）'
+    $ilBefore = Get-NtsIntegrityLabel $UserPluginDir
+    if (Set-NtsLowIntegrity $UserPluginDir) {
+        if ($ilBefore -ne 'Low') {
+            Add-Change ("插件目录完整性级别：{0} → Low（插件子进程为 Low IL，否则面板保存会 PermissionError）" -f $(if ($ilBefore) { $ilBefore } else { '继承' }))
+        }
+        Write-Ok ("插件目录完整性级别 = Low：{0}" -f $UserPluginDir)
+    } else {
+        Add-Warning ("插件目录完整性级别修正失败（当前 {0}）：{1}。面板「应用」可能报 Errno 13，请以管理员身份重跑本脚本。" -f $ilBefore, $UserPluginDir)
+    }
+
+    if (Test-Path -LiteralPath $UserDataBackupRoot) {
+        $bakBefore = Get-NtsIntegrityLabel $UserDataBackupRoot
+        if (Set-NtsLowIntegrity $UserDataBackupRoot) {
+            if ($bakBefore -ne 'Low') {
+                Add-Change ("备份目录完整性级别：{0} → Low（插件 startup 需要写原始模板备份）" -f $(if ($bakBefore) { $bakBefore } else { '继承' }))
+            }
+            Write-Ok ("备份目录完整性级别 = Low：{0}" -f $UserDataBackupRoot)
+        } else {
+            Add-Warning ("备份目录完整性级别修正失败（当前 {0}）：{1}" -f $bakBefore, $UserDataBackupRoot)
+        }
+    }
+    # 模板目录也由插件（Low IL）在 startup 时原地补丁。应用装在 Program Files 之类
+    # 受保护位置时，模板目录是 Medium/High，插件写不进去 → 除 chat/index 外的窗口
+    # 会缺标记（白屏风险）。这里只警告，不擅自降低应用目录的安全性。
+    $tplIl = Get-NtsIntegrityLabel $TemplateDir
+    if ($tplIl -and $tplIl -ne 'Low') {
+        Add-Warning ("模板目录完整性级别为 {0}（非 Low）：插件以 Low IL 运行时无法自行补丁除 chat/index 外的模板。若这些窗口白屏，请在宿主更新后以管理员身份重跑 install.ps1。" -f $tplIl)
+    }
+} else {
+    Write-Info "插件安装目录不存在，跳过完整性级别修正：$UserPluginDir"
 }
 
 # ---------------------------------------------------------------------------
@@ -1335,6 +2009,67 @@ if ($p48916) {
 $probes = @{}
 foreach ($t in $TplTargets) { $probes[$t.Name] = Get-TextFileProbe -Path $t.Path }
 $failedCount = Invoke-Verification
+
+# ---------------------------------------------------------------------------
+# G2. 清理：只有「新安装 + 验证」全部成功才删除旧回滚点 / 事务快照 / 旧用户数据备份
+# ---------------------------------------------------------------------------
+# 失败时全保留：旧回滚点、本次回滚点、模板 txn 快照、userdata 备份都能用来取证或手工恢复。
+$pluginStateOk = $SkipPluginInstall -or $pluginVersionBlocked -or $pluginInstallOk
+$installFullyOk = ($failedCount -eq 0) -and $pluginStateOk
+
+if ($installFullyOk) {
+    Write-Head 'G2. 清理旧回滚点与旧用户数据备份（安装 + 验证均成功）'
+
+    foreach ($priorDir in @($script:PriorRollbackDirs)) {
+        if (-not (Test-Path -LiteralPath $priorDir)) { continue }
+        Remove-Item -LiteralPath $priorDir -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $priorDir) {
+            Add-Warning ("旧的插件回滚点删除失败：{0}（可手动删除）" -f $priorDir)
+        } else {
+            Write-Ok ("已删除上一次的插件回滚点：{0}" -f $priorDir)
+        }
+    }
+
+    if ($pluginBakDir -and (Test-Path -LiteralPath $pluginBakDir)) {
+        Remove-Item -LiteralPath $pluginBakDir -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $pluginBakDir) {
+            Add-Warning ("本次安装的旧插件目录回滚点删除失败：{0}（可手动删除）" -f $pluginBakDir)
+        } else {
+            Write-Ok ("已删除本次安装的旧插件目录回滚点：{0}" -f $pluginBakDir)
+        }
+    }
+
+    if ($script:TemplateTxnDir -and (Test-Path -LiteralPath $script:TemplateTxnDir)) {
+        Remove-Item -LiteralPath $script:TemplateTxnDir -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $script:TemplateTxnDir) {
+            Add-Warning ("模板事务快照删除失败：{0}（可手动删除）" -f $script:TemplateTxnDir)
+        } else {
+            Write-Ok ("已删除模板事务快照：{0}" -f $script:TemplateTxnDir)
+        }
+    }
+
+    if ($script:UserDataBackup -and $script:UserDataBackup.Dir) {
+        $keepDir = [System.IO.Path]::GetFullPath($script:UserDataBackup.Dir)
+        $oldBackups = @(Get-ChildItem -LiteralPath $UserDataBackupRoot -Directory -Filter 'userdata-*' -ErrorAction SilentlyContinue |
+                        Where-Object { [System.IO.Path]::GetFullPath($_.FullName) -ne $keepDir })
+        foreach ($ob in $oldBackups) {
+            Remove-Item -LiteralPath $ob.FullName -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $ob.FullName) {
+                Add-Warning ("旧用户数据备份删除失败：{0}（可手动删除）" -f $ob.FullName)
+            } else {
+                Write-Ok ("已清理旧用户数据备份：{0}" -f $ob.Name)
+            }
+        }
+        Write-Info ("本次用户数据备份保留在：{0}（下次安装成功后会清理）" -f $keepDir)
+    }
+} else {
+    Write-Head 'G2. 保留回滚点（安装或验证未全部成功）'
+    if ($pluginBakDir) { Write-Warn2 ("旧插件目录回滚点保留：{0}" -f $pluginBakDir) }
+    foreach ($priorDir in @($script:PriorRollbackDirs)) { Write-Warn2 ("上一次的回滚点保留：{0}" -f $priorDir) }
+    if ($script:TemplateTxnDir) { Write-Warn2 ("模板事务快照保留：{0}" -f $script:TemplateTxnDir) }
+    if ($script:UserDataBackup) { Write-Warn2 ("用户数据备份保留：{0}" -f $script:UserDataBackup.Dir) }
+    Write-Warn2 '修复上面的失败原因后重跑 install.ps1；成功的一次会自动清理这些旧备份。'
+}
 
 # ---------------------------------------------------------------------------
 # H. 报告
@@ -1359,6 +2094,10 @@ foreach ($t in $TplTargets) {
     Write-Host ("   {0,-12} 第 {1} 行  ({2})" -f $t.Name, $no, $t.Path) -ForegroundColor Gray
 }
 
+Write-Host ''
+Write-Host '  重要：请完全退出 N.E.K.O（含托盘图标）后重新打开，主题才会生效。' -ForegroundColor Cyan
+Write-Host '        只刷新页面（F5）不够：loader 只在应用启动时加载，托盘图标也必须退出。' -ForegroundColor DarkGray
+
 if ($script:Warnings.Count -gt 0) {
     Write-Host ''
     Write-Host ("  警告 {0} 条：" -f $script:Warnings.Count) -ForegroundColor Yellow
@@ -1370,6 +2109,13 @@ $elapsed = ((Get-Date) - $StartedAt).TotalSeconds
 Write-Host ''
 if ($failedCount -gt 0) {
     Write-Host ("  ❌ 安装完成但验证有 {0} 项失败，用时 {1:N1} 秒。" -f $failedCount, $elapsed) -ForegroundColor Red
+    exit 1
+}
+if (-not $pluginStateOk) {
+    # 插件没装上（或升级失败）时不能报成功：应用侧补丁会照样生效，但主题面板/自动换主题
+    # 全都不可用，exit 0 会让「一键升级」脚本以为一切正常。
+    Write-Host ("  ❌ 应用侧已完成，但插件安装未成功，用时 {0:N1} 秒。" -f $elapsed) -ForegroundColor Red
+    Write-Host '     修复上面的插件安装错误后重跑 install.ps1（加 -SkipPluginInstall 则只做应用侧）。' -ForegroundColor DarkGray
     exit 1
 }
 if ($script:Warnings.Count -gt 0) {

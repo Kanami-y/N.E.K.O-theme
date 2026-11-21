@@ -13,9 +13,10 @@
   "unconfigured == not loaded" structural instead of measured. The measurement step is
   now informational: it feeds the panel's reference values and the coverage harness.
 
-  Usage:
-      powershell -File build-theme-css.ps1              # regenerate + verify
-      powershell -File build-theme-css.ps1 -SkipDeploy  # regenerate into build\ only
+  Usage (scripts in this repo are unsigned; do not teach -ExecutionPolicy Bypass):
+      powershell -NoProfile -File build-theme-css.ps1              # regenerate + verify
+      powershell -NoProfile -File build-theme-css.ps1 -SkipDeploy  # regenerate into build\ only
+      If execution policy blocks the script, run it from an elevated PowerShell or sign it yourself.
   Exit: 0 = generated and zero-change invariant holds; 1 = regression; 2 = harness/setup failure
 #>
 [CmdletBinding()]

@@ -1,5 +1,10 @@
 # 待验证队列（verifier 结束后一次性跑）
 
+> ⚠ **归档文档（不再更新）**：本文件保留 0.1.4 → 0.1.10 期间的逐轮验证日志、量测记录与「故意不修」清单，
+> 供追溯当时的判断依据。**当前版本的用户可见变更请看 [`CHANGELOG.md`](CHANGELOG.md)**；
+> 安装、校验、打包的现行做法看 [`README.md`](README.md) 与 [`DISTRIBUTION.md`](DISTRIBUTION.md)。
+> 文中的版本号、文件尺寸、sha256 与「待办」都是**当时**的事实，不要当成当前状态执行。
+
 在 `verify-v3` 报告之前**不写任何东西**：所有 `install.ps1` / `accept.ps1` /
 `build-theme-css.ps1` / `page-eval` 探针都会改 theme.json 或重启插件服务，
 污染它的量测。本文件只是把「等它说完要做的事」写下来，不执行。
@@ -1124,3 +1129,48 @@ computed 依然报出正确值，只有像素能揭穿：描边设 6px 纯绿时
   loader 的 15s 复检换表，或关掉聊天窗口重开一次（应用屏蔽了 F5/Ctrl+R）。
 - 描边 / 四角 / 反射 / 内阴影首次真正可见，观感需要用户用眼睛确认强度是否合意；
   收法是调小 `--nts-panel-border-width` / `-corner-glow` / `-sheen` / `-inner-glow`。
+
+## 第十七轮（2026-11-16 上午 · Yui 77 项重建 + `transparent` 白名单缺口）
+
+用户把 `C:\Users\Administrator\Downloads\yui.txt`（77 项全参数表）交过来要求按它重配。
+按文件逐项写入后，发现文件里大量使用 `transparent`，而这个词在 loader 与面板的白名单里
+根本不合法 —— 也就是说「按文档配好」本身会有一部分静默失效。
+
+| # | 现象 | 原因 | 修法 |
+| --- | --- | --- | --- |
+| 17-1 | 把任意「颜色」项设成 `transparent`，面板不标红、应用返回成功、外观完全不变 | `loader` 与面板的 `COLOR_NAMES` 表里没有 `transparent`（后端 `RE_KEYWORD_COLOR` 从第一版就有）。门控属性由 loader 写入，被拒 → 门控不生成 → 声明永不匹配 | 两张表都以 `'transparent aliceblue …'` 开头，共 150 项；loader `SCRIPT_VERSION` → `1.5.11` |
+
+### 验证数据
+
+- `window.NekoThemeStudio._internals.isSafeValue`：`transparent` 对
+  `--nts-chat-bg` / `--nts-chat-panel-bg` / `--nts-image-bg` / `--nts-button-bg` /
+  `--nts-scrollbar-track` 五项全部 `false` → 修后全部 `true`；
+  `sanitizeVars` 也从丢弃变为原样保留。
+- 面板 `isSafeValue`：同样五项 `false` → `true`。
+- 面板真实页（`http://127.0.0.1:48916/plugin/neko_theme_studio/ui/`）：77 行，
+  五项的 `.hex` 值都是 `transparent`、`is-bad` 全为 `false`、placeholder 是「原生 transparent」。
+- 真实 `/chat` computed（注入真实紧凑历史结构，调色板 = yui.txt 全 77 项）：
+  `scrollBg rgba(255,255,255,0.2)`（玻璃底色）、
+  `scrollBgImg linear-gradient(rgba(0,0,0,0.15)…) + url(背景图)`、
+  `scrollRadius 32px`、`scrollBefore filter blur(12px) / z-index -1`、
+  `glow boxShadow … / 0.4 / 11.2px 4.704px`、
+  `decor border 1px rgba(255,255,255,0.9) / inset 28px 0 0 / bgCount 5`、
+  气泡 `rgba(255,255,255,0.8) / rgb(64,84,115) / 24px / outline 白 1px`。
+- `run-tests.ps1` EXIT=0（六次探测各 315 rows、`ntsRules` 0/616、零改动不变量亮暗各 0 差异、
+  覆盖率亮暗各 175/175）；`accept.ps1` 86 passed / 0 failed。
+- `deploy_audit.py` OVERALL PASS（CSS `654604f6`×5、loader `55f048ab`×6、
+  面板 app.js `841f7e34`×2、23 模板键 `-654604f6` / `-55f048ab`）。
+
+### 教训
+
+- 「文档写对」不等于「实现收得下」：拿一份外部规格批量写入时，先拿**每一项的值**
+  逐个过一遍三处校验器（loader `_internals.isSafeValue` + 面板 `isSafeValue` +
+  一次 `apply_theme` 的 `rejected`），再谈观感。
+- 后端接受、前端拒绝 = 最坏的一种不一致：`apply_theme` 永远 succeeded，
+  面板永远不报错，用户只能看到「什么也没发生」。
+
+### 仍 PENDING
+
+- 真实窗口需重载一次才会载入 loader `1.5.11`（应用屏蔽了 F5 / Ctrl+R，
+  只能关窗重开或重启）。重载前 `transparent` 那五项在真实窗口里仍不会生效。
+- `starry-meow` 内置主题仍是 64 项（不含光效），本轮只按用户要求重建了 `yui-ice`。

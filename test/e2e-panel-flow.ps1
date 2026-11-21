@@ -1,4 +1,4 @@
-# e2e-panel-flow.ps1 -- drive the theme plugin the way its own panel does, then check the
+﻿# e2e-panel-flow.ps1 -- drive the theme plugin the way its own panel does, then check the
 # app-side loader can see the result.
 #
 #   powershell -File e2e-panel-flow.ps1 [-Color "#7c3aed"] [-Reset]

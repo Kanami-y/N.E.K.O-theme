@@ -588,6 +588,19 @@ top: calc(28px * var(--nts-chat-top-fade, 1)) !important;
 **别改成给伪元素套同一条 mask。** mask 的绘制区就是边框盒，装不进外发光，外溢部分
 会被整块裁掉 —— 实测整屏光晕归零。
 
+### 4.0c `transparent` 是合法的颜色值（v0.1.10 之后修好）
+
+三处校验器都收 `transparent`，但早期只有后端收，`loader` 与面板各自的
+`COLOR_NAMES` 表里漏了这一项 —— 表现是**面板不标红、`apply_theme` 返回 succeeded、
+门控属性却不生成、声明永远不匹配**，也就是「设成透明之后什么也没发生」。
+
+- 受影响的是所有 `type: 'color'` 的项（50 个），最典型的是「聊天窗口背景」「聊天背板背景」
+  「工具按钮背景」「图片块背景」「滚动条轨道」。
+- **滚动条要成对**：`--nts-scrollbar-track` 被丢还会连带拖死 `--nts-scrollbar-thumb`
+  （同一条 `scrollbar-color` 声明消费两个变量），所以「只改滚动条颜色没反应」很可能是
+  轨道那一项用了 `transparent` 而没被接受。
+- 现在两处白名单都以 `'transparent aliceblue ...'` 开头，`loader` 版本 `1.5.11`。
+
 ### 4.1 三个文字色变量各管各的气泡（v0.1.4 起）
 
 真实聊天 DOM 的气泡是 `article.message-row.message-row-<role> > div.message-stack >

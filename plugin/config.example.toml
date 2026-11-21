@@ -1,0 +1,19 @@
+# neko_theme_studio 运行时配置示例 / runtime config example
+#
+# 安装时宿主会把本文件复制到用户配置目录作为「基础配置」：
+#   %LOCALAPPDATA%\N.E.K.O\plugins\neko_theme_studio\config\plugin.toml
+# 之后用户在插件管理的「配置」页改动的是那份副本，本文件保持不变。
+#
+# 这里只放【可变的运行时默认值】。[plugin] 段（id / name / version / entry /
+# ui / i18n …）属于插件清单，一律写在 plugin.toml 里；重复一份会随着版本升级
+# 变成过期数据（effective_config 里清单始终覆盖基础配置，但 /config/base 会
+# 显示旧值）。
+
+[plugin_runtime]
+# 必须自动启动：面板的读取/保存都要调用插件 entry，而插件未运行时 48916 会以
+# NOT_READY 拒绝（{"error":{"code":"NOT_READY", ...}}），面板只能读不能存。
+# 用户路径是「从插件市场安装 → 打开面板 → 调色」，中间不该有手动启动这一步。
+auto_start = true
+
+# 允许插件被加载。
+enabled = true

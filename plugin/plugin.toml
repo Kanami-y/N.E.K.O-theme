@@ -6,11 +6,11 @@ description = "在插件面板中编辑 N.E.K.O 聊天气泡、窗口、输入�
 short_description = "可视化编辑并保存 N.E.K.O 主题调色板（含暗色与透明度）。"
 keywords = ["theme", "color", "palette", "dark-mode", "主题", "调色板"]
 passive = false
-version = "0.1.10"
+version = "1.0.5"
 entry = "plugin.plugins.neko_theme_studio:NekoThemeStudioPlugin"
 
 [plugin.author]
-name = "N.E.K.O Team"
+name = "Kanami-y"
 
 [plugin.sdk]
 recommended = ">=0.1.0,<0.2.0"

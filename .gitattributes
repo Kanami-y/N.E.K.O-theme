@@ -1,0 +1,27 @@
+# ---------------------------------------------------------------
+# 换行符：只为「逐字节比对」的产物锁定 LF，其余文件交给默认策略。
+#
+# 为什么需要：plugin/tests/test_bg_anchor.py 的
+#   test_generator_is_reproducible  会重新跑 CSS 生成器，把产出和仓库里的
+#   plugin/static/loader/neko-theme-studio.css 逐字节比对；
+#   test_copies_are_byte_identical  再把 app/ 与 app-patch/ 里的镜像逐字节比对。
+# Windows 检出（core.autocrlf=true）会把 LF 转成 CRLF，这三条比对必然误报，
+# 而根因在检出配置、不在生成器 —— 用 eol=lf 把变量钉死在仓库侧。
+# ---------------------------------------------------------------
+plugin/static/loader/neko-theme-studio.css text eol=lf
+app/css/neko-theme-studio.css              text eol=lf
+app-patch/files/css/neko-theme-studio.css  text eol=lf
+build/*.css                                text eol=lf
+
+# 二进制：显式标记，避免被当成文本参与 diff / 换行转换
+*.zip         binary
+*.neko-plugin binary
+*.png         binary
+*.jpg         binary
+*.jpeg        binary
+*.gif         binary
+*.webp        binary
+*.ico         binary
+*.woff        binary
+*.woff2       binary
+*.ttf         binary

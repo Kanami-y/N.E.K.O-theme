@@ -11,6 +11,7 @@ theme.json 的 vars —— 面板显示「已应用」，用户看到的是整�
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import sys
 import tempfile
@@ -23,8 +24,10 @@ for _path in (str(_PLUGIN_DIR), str(_HERE)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from offline_backend import load_backend
-from test_library_archive import make_plugin, must_err, unwrap
+_ob = importlib.import_module("offline_backend")
+load_backend = _ob.load_backend
+_tla = importlib.import_module("test_library_archive")
+make_plugin, must_err, unwrap = _tla.make_plugin, _tla.must_err, _tla.unwrap
 
 NS = load_backend()
 

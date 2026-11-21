@@ -15,14 +15,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import shutil
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from offline_backend import ROOT as REPO_ROOT, load_backend  # noqa: E402
+from offline_backend import ROOT as REPO_ROOT  # noqa: E402
+from offline_backend import load_backend
 
 NS = load_backend()
 Plugin = NS["NekoThemeStudioPlugin"]

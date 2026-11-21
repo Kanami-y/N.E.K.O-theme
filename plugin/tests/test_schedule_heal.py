@@ -15,12 +15,12 @@ import re
 import sys
 import tempfile
 import unittest
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from offline_backend import ROOT as REPO_ROOT, load_backend  # noqa: E402
+from offline_backend import ROOT as REPO_ROOT  # noqa: E402
+from offline_backend import load_backend
 from test_schedule import FIXED_NOW, make_plugin, write_preset  # noqa: E402
 
 NS = load_backend()

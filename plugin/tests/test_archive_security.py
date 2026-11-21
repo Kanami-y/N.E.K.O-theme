@@ -1,6 +1,7 @@
-from __future__ import annotations
+"""
 
-"""分享包边界安全测试（v0.15.52）。
+from __future__ import annotations
+分享包边界安全测试（v0.15.52）。
 
 这些行为早就实现了，但**没有一条测试看着它们**：改一次 `_parse_archive` 或
 `_rewrite_archive_refs`，把「非法路径拒绝」写成「静默跳过」，全量测试照样全绿

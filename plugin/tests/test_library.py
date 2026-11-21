@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import unittest
-from pathlib import Path
 
 from offline_backend import ROOT, load_backend
 

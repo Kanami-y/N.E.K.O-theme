@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import base64
+import importlib
 import io
 import json
 import sys
@@ -27,7 +28,8 @@ _PLUGIN_DIR = Path(__file__).resolve().parent.parent
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
-from offline_backend import ROOT, load_backend
+_ob = importlib.import_module("offline_backend")
+ROOT, load_backend = _ob.ROOT, _ob.load_backend
 
 NS = load_backend()
 Plugin = NS["NekoThemeStudioPlugin"]

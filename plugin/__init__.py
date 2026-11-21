@@ -4318,7 +4318,7 @@ class NekoThemeStudioPlugin(NekoPluginBase):
     async def delete_theme(self, theme_id: Any = "", id: Any = "", **_):
         theme_id = theme_id or id
         try:
-            record = self._load_library_item(theme_id)
+            self._load_library_item(theme_id)  # 只取副作用：条目不存在这里就抛 SdkError
             # 用**请求里的 id** 判断/定位：文件名才是仓库主键（_library_items 也按文件名），
             # 记录里的 "id" 字段只是文件内容，手改过就会指向另一套主题。
             requested = str(theme_id or "").strip()

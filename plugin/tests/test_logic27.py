@@ -13,10 +13,9 @@
 from __future__ import annotations
 
 import asyncio
-import re
+import sys
 import threading
 import time
-import sys
 import unittest
 from pathlib import Path
 

@@ -14,7 +14,6 @@ import json
 import re
 import unittest
 import zipfile
-from pathlib import Path
 
 from offline_backend import ROOT
 

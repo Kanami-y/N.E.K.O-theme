@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import sys
 import tempfile
@@ -21,7 +22,7 @@ _PLUGIN_DIR = Path(__file__).resolve().parent.parent
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
-from offline_backend import load_backend
+load_backend = importlib.import_module("offline_backend").load_backend
 
 NS = load_backend()
 Plugin = NS["NekoThemeStudioPlugin"]

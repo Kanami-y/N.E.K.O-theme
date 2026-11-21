@@ -16,7 +16,7 @@ import unittest
 from pathlib import Path
 
 from offline_backend import load_backend
-from test_library_archive import make_plugin, must_err, unwrap
+from test_library_archive import make_plugin, must_err
 
 NS = load_backend()
 Plugin = NS["NekoThemeStudioPlugin"]

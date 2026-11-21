@@ -2,3 +2,24 @@
 name = "neko_theme_studio"
 version = "1.0.5"
 dependencies = []
+
+# 市场包（.neko-plugin）只装运行时需要的文件。
+# 官方打包器默认会把插件目录整个拷进 payload，于是开发测试、用户自己的
+# 背景图/主题库/导出文件、以及随手丢在根目录的截图都会一起上架 ——
+# 体积翻倍不说，用户数据混进公开包是实打实的隐私问题。
+# 规则语义（neko_plugin_cli/build_rules.py）：路径按 posix 相对路径做
+# fnmatch；exclude_dirs 匹配任意一层目录名，exclude/exclude_files 匹配整条路径。
+[tool.neko.build]
+exclude_dirs = ["tests"]
+exclude = [
+    "static/backgrounds/*",
+    "static/themes/*",
+    "static/exports/*",
+    "static/schedule.json",
+]
+exclude_files = [
+    ".gitignore",
+    "ruff.toml",
+    "config.example.toml",
+    "file_0000000053308212b71c8d18a5e76a2e.png",
+]

@@ -10,6 +10,14 @@
 - 新增回归测试 `test_schedule_heal.ApplyErrorDebounceTests`：保存排程即 tick 一次（1 条 warning），
   连续 force tick 3 次仍只 1 条；条目改好后 force tick 恢复 applied，非 force tick 走 unchanged。
 
+### 打包
+
+- **市场包不再混进测试和用户数据**：官方打包器默认把插件目录整个塞进 payload，
+  于是 `tests/`（52 个文件）、`static/backgrounds/` 里你自己的背景图、根目录随手丢的
+  截图全都会跟着上架 —— 包体积 4.9MB 里近 1.5MB 是这些。现在在
+  `plugin/pyproject.toml` 声明 `[tool.neko.build]` 排除，`test_package_plugin`
+  从此对官方包也生效（原来只约束宿主内置打包）。
+
 ### 数字
 
 - 后端测试 730 OK（skipped=1）；状态机随机游走（含材质与排程操作）种子 20261121 × 200 步全 PASS；

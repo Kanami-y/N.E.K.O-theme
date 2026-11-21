@@ -114,7 +114,7 @@ powershell -NoProfile -File .\uninstall.ps1 -WhatIf    # 预演：只打印，�
 
 把 [`AI-THEME-GUIDE.md`](AI-THEME-GUIDE.md)（约 660 行，由代码里的单一事实源生成：95 个变量、
 类型语法、风格族判定、对比度阈值、配方与完整示例）**整份**发给任意 AI，让它按 §0 的契约输出一个
-JSON 文件；在仓库里可以先用 `python _work/validate_theme.py 主题.json` 自检（0 = 可导入），
+JSON 文件；在仓库里可以先用 `python tools/validate_theme.py 主题.json` 自检（0 = 可导入），
 再到面板「主题仓库 → 导入」。不需要写代码、不需要改 CSS。
 
 超过 24 小时没更新过指南时，先跑 `node _work/dump_catalog.js && python _work/gen_ai_guide.py`

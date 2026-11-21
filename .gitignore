@@ -4,6 +4,8 @@ build/*.tmp.*
 build/*.log
 build/*.diff
 build/*.json
+# 例外：vars.json 是契约测试的输入（plugin/tests/test_contract.py），必须入库
+!build/vars.json
 dist/*.tmp
 *.tmp
 *.log

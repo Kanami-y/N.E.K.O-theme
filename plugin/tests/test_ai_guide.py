@@ -69,11 +69,11 @@ class GuideExampleTests(unittest.TestCase):
 
 class ValidatorToolTests(unittest.TestCase):
     def test_validator_script_is_runnable_source(self) -> None:
-        path = ROOT / "_work" / "validate_theme.py"
-        self.assertTrue(path.is_file(), "缺少 _work/validate_theme.py")
+        path = ROOT / "tools" / "validate_theme.py"
+        self.assertTrue(path.is_file(), "缺少 tools/validate_theme.py")
         source = path.read_text(encoding="utf-8")
         self.assertIn("def main(", source)
-        self.assertIn("_work/validate_theme.py", source)
+        self.assertIn("tools/validate_theme.py", source)
 
 
 if __name__ == "__main__":

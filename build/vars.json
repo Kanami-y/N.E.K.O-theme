@@ -6,7 +6,9 @@
     "darkNative": "rgb(42, 123, 196)",
     "sels": [
       ".message.user | background-color",
-      ".message-bubble-user | background-color"
+      ".message-bubble-user | background-color",
+      ".compact-export-history-message.is-user .compact-export-history-bubble | background-color",
+      ".compact-export-preview-message.is-user .compact-export-preview-bubble | background-color"
     ]
   },
   "--nts-user-bubble-text": {
@@ -20,7 +22,26 @@
       ".message-bubble-user .message-block-text | color",
       ".message-bubble-user .message-block-text-plain | color",
       ".message-bubble-user .message-block-markdown | color",
-      ".message.user .message-block-markdown | color"
+      ".message.user .message-block-markdown | color",
+      ".message-bubble-user .message-block-markdown h1, .message-bubble-user .message-block-markdown h2, .message-bubble-user .message-block-markdown h3, .message-bubble-user .message-block-markdown h4, .message-bubble-user .message-block-markdown h5, .message-bubble-user .message-block-markdown h6 | color",
+      ".message-bubble-user .message-block-markdown blockquote | color",
+      ".message-bubble-user .message-block-markdown th | color",
+      ".compact-export-history-message.is-user .compact-export-history-bubble | color",
+      ".compact-export-history-message.is-user .compact-export-history-bubble .message-block-text | color",
+      ".compact-export-history-message.is-user .compact-export-history-bubble .message-block-text-plain | color",
+      ".compact-export-history-message.is-user .compact-export-history-bubble .message-block-markdown | color",
+      ".compact-export-history-message.is-user .compact-export-history-bubble .message-block-markdown h1, .compact-export-history-message.is-user .compact-export-history-bubble .message-block-markdown h2, .compact-export-history-message.is-user .compact-export-history-bubble .message-block-markdown h3, .compact-export-history-message.is-user .compact-export-history-bubble .message-block-markdown h4, .compact-export-history-message.is-user .compact-export-history-bubble .message-block-markdown h5, .compact-export-history-message.is-user .compact-export-history-bubble .message-block-markdown h6 | color",
+      ".compact-export-history-message.is-user .compact-export-history-bubble .message-block-markdown blockquote | color",
+      ".compact-export-history-message.is-user .compact-export-history-bubble .message-block-markdown th | color",
+      ".compact-export-history-message.is-user .compact-export-history-bubble .message-block-markdown td | color",
+      ".compact-export-preview-message.is-user .compact-export-preview-bubble | color",
+      ".compact-export-preview-message.is-user .compact-export-preview-bubble .message-block-text | color",
+      ".compact-export-preview-message.is-user .compact-export-preview-bubble .message-block-text-plain | color",
+      ".compact-export-preview-message.is-user .compact-export-preview-bubble .message-block-markdown | color",
+      ".compact-export-preview-message.is-user .compact-export-preview-bubble .message-block-markdown h1, .compact-export-preview-message.is-user .compact-export-preview-bubble .message-block-markdown h2, .compact-export-preview-message.is-user .compact-export-preview-bubble .message-block-markdown h3, .compact-export-preview-message.is-user .compact-export-preview-bubble .message-block-markdown h4, .compact-export-preview-message.is-user .compact-export-preview-bubble .message-block-markdown h5, .compact-export-preview-message.is-user .compact-export-preview-bubble .message-block-markdown h6 | color",
+      ".compact-export-preview-message.is-user .compact-export-preview-bubble .message-block-markdown blockquote | color",
+      ".compact-export-preview-message.is-user .compact-export-preview-bubble .message-block-markdown th | color",
+      ".compact-export-preview-message.is-user .compact-export-preview-bubble .message-block-markdown td | color"
     ]
   },
   "--nts-ai-bubble-bg": {
@@ -30,7 +51,9 @@
     "darkNative": "rgba(42, 123, 196, 0.18)",
     "sels": [
       ".message.gemini | background-color",
-      ".message-bubble-assistant | background-color"
+      ".message-bubble-assistant | background-color",
+      ".compact-export-history-message.is-assistant .compact-export-history-bubble | background-color",
+      ".compact-export-preview-message.is-assistant .compact-export-preview-bubble | background-color"
     ]
   },
   "--nts-ai-bubble-text": {
@@ -44,7 +67,29 @@
       ".message-bubble-assistant .message-block-text | color",
       ".message-bubble-assistant .message-block-markdown | color",
       ".message.gemini .message-block-text | color",
-      ".message.gemini .message-block-markdown | color"
+      ".message.gemini .message-block-markdown | color",
+      ".message-bubble-assistant .message-block-markdown h1, .message-bubble-assistant .message-block-markdown h2, .message-bubble-assistant .message-block-markdown h3, .message-bubble-assistant .message-block-markdown h4, .message-bubble-assistant .message-block-markdown h5, .message-bubble-assistant .message-block-markdown h6 | color",
+      ".message-bubble-assistant .message-block-markdown blockquote | color",
+      ".message-bubble-assistant .message-block-markdown th | color",
+      ".message-bubble-assistant .message-block-markdown td | color",
+      ".message.gemini .message-block-markdown h1, .message.gemini .message-block-markdown h2, .message.gemini .message-block-markdown h3, .message.gemini .message-block-markdown h4, .message.gemini .message-block-markdown h5, .message.gemini .message-block-markdown h6 | color",
+      ".message.gemini .message-block-markdown blockquote | color",
+      ".compact-export-history-message.is-assistant .compact-export-history-bubble | color",
+      ".compact-export-history-message.is-assistant .compact-export-history-bubble .message-block-text | color",
+      ".compact-export-history-message.is-assistant .compact-export-history-bubble .message-block-text-plain | color",
+      ".compact-export-history-message.is-assistant .compact-export-history-bubble .message-block-markdown | color",
+      ".compact-export-history-message.is-assistant .compact-export-history-bubble .message-block-markdown h1, .compact-export-history-message.is-assistant .compact-export-history-bubble .message-block-markdown h2, .compact-export-history-message.is-assistant .compact-export-history-bubble .message-block-markdown h3, .compact-export-history-message.is-assistant .compact-export-history-bubble .message-block-markdown h4, .compact-export-history-message.is-assistant .compact-export-history-bubble .message-block-markdown h5, .compact-export-history-message.is-assistant .compact-export-history-bubble .message-block-markdown h6 | color",
+      ".compact-export-history-message.is-assistant .compact-export-history-bubble .message-block-markdown blockquote | color",
+      ".compact-export-history-message.is-assistant .compact-export-history-bubble .message-block-markdown th | color",
+      ".compact-export-history-message.is-assistant .compact-export-history-bubble .message-block-markdown td | color",
+      ".compact-export-preview-message.is-assistant .compact-export-preview-bubble | color",
+      ".compact-export-preview-message.is-assistant .compact-export-preview-bubble .message-block-text | color",
+      ".compact-export-preview-message.is-assistant .compact-export-preview-bubble .message-block-text-plain | color",
+      ".compact-export-preview-message.is-assistant .compact-export-preview-bubble .message-block-markdown | color",
+      ".compact-export-preview-message.is-assistant .compact-export-preview-bubble .message-block-markdown h1, .compact-export-preview-message.is-assistant .compact-export-preview-bubble .message-block-markdown h2, .compact-export-preview-message.is-assistant .compact-export-preview-bubble .message-block-markdown h3, .compact-export-preview-message.is-assistant .compact-export-preview-bubble .message-block-markdown h4, .compact-export-preview-message.is-assistant .compact-export-preview-bubble .message-block-markdown h5, .compact-export-preview-message.is-assistant .compact-export-preview-bubble .message-block-markdown h6 | color",
+      ".compact-export-preview-message.is-assistant .compact-export-preview-bubble .message-block-markdown blockquote | color",
+      ".compact-export-preview-message.is-assistant .compact-export-preview-bubble .message-block-markdown th | color",
+      ".compact-export-preview-message.is-assistant .compact-export-preview-bubble .message-block-markdown td | color"
     ]
   },
   "--nts-bubble-radius": {
@@ -55,7 +100,15 @@
     "sels": [
       ".message-bubble-user | border-radius",
       ".message-bubble-assistant | border-radius",
-      ".message-bubble-tool | border-radius"
+      ".message-bubble-tool | border-radius",
+      ".compact-export-history-message.is-user .compact-export-history-bubble | border-radius",
+      ".compact-export-history-message.is-assistant .compact-export-history-bubble | border-radius",
+      ".compact-export-history-message.is-system .compact-export-history-bubble | border-radius",
+      ".compact-export-history-bubble | border-radius",
+      ".compact-export-preview-message.is-user .compact-export-preview-bubble | border-radius",
+      ".compact-export-preview-message.is-assistant .compact-export-preview-bubble | border-radius",
+      ".compact-export-preview-message.is-system .compact-export-preview-bubble | border-radius",
+      ".compact-export-preview-bubble | border-radius"
     ]
   },
   "--nts-tool-bubble-bg": {
@@ -65,7 +118,11 @@
     "darkNative": "rgba(0, 0, 0, 0)",
     "sels": [
       ".message-bubble-tool | background-color",
-      ".message-bubble-system | background-color"
+      ".message-bubble-system | background-color",
+      ".compact-export-history-message.is-visit-peer .compact-export-history-bubble | background-color",
+      ".compact-export-history-message.is-system .compact-export-history-bubble | background-color",
+      ".compact-export-preview-message.is-visit-peer .compact-export-preview-bubble | background-color",
+      ".compact-export-preview-message.is-system .compact-export-preview-bubble | background-color"
     ]
   },
   "--nts-tool-bubble-text": {
@@ -79,7 +136,19 @@
       ".message-bubble-tool .message-block-text | color",
       ".message-bubble-tool .message-block-markdown | color",
       ".message-bubble-system .message-block-text | color",
-      ".message-bubble-system .message-block-markdown | color"
+      ".message-bubble-system .message-block-markdown | color",
+      ".message-bubble-tool .message-block-markdown h1, .message-bubble-tool .message-block-markdown h2, .message-bubble-tool .message-block-markdown h3, .message-bubble-tool .message-block-markdown h4, .message-bubble-tool .message-block-markdown h5, .message-bubble-tool .message-block-markdown h6 | color",
+      ".message-bubble-tool .message-block-markdown blockquote | color",
+      ".message-bubble-system .message-block-markdown h1, .message-bubble-system .message-block-markdown h2, .message-bubble-system .message-block-markdown h3, .message-bubble-system .message-block-markdown h4, .message-bubble-system .message-block-markdown h5, .message-bubble-system .message-block-markdown h6 | color",
+      ".message-bubble-system .message-block-markdown blockquote | color",
+      ".compact-export-history-message.is-visit-peer .compact-export-history-bubble | color",
+      ".compact-export-history-message.is-system .compact-export-history-bubble | color",
+      ".compact-export-history-message.is-system .compact-export-history-bubble .message-block-text | color",
+      ".compact-export-history-message.is-system .compact-export-history-bubble .message-block-markdown | color",
+      ".compact-export-preview-message.is-visit-peer .compact-export-preview-bubble | color",
+      ".compact-export-preview-message.is-system .compact-export-preview-bubble | color",
+      ".compact-export-preview-message.is-system .compact-export-preview-bubble .message-block-text | color",
+      ".compact-export-preview-message.is-system .compact-export-preview-bubble .message-block-markdown | color"
     ]
   },
   "--nts-user-bubble-border": {
@@ -89,7 +158,9 @@
     "darkNative": "rgb(216, 230, 255)",
     "sels": [
       ".message-bubble-user | outline-color",
-      ".message.user | outline-color"
+      ".message.user | outline-color",
+      ".compact-export-history-message.is-user .compact-export-history-bubble | outline-color",
+      ".compact-export-preview-message.is-user .compact-export-preview-bubble | outline-color"
     ]
   },
   "--nts-ai-bubble-border": {
@@ -99,7 +170,9 @@
     "darkNative": "rgb(232, 234, 237)",
     "sels": [
       ".message-bubble-assistant | outline-color",
-      ".message.gemini | outline-color"
+      ".message.gemini | outline-color",
+      ".compact-export-history-message.is-assistant .compact-export-history-bubble | outline-color",
+      ".compact-export-preview-message.is-assistant .compact-export-preview-bubble | outline-color"
     ]
   },
   "--nts-font-size": {
@@ -182,7 +255,9 @@
     "native": "rgba(255, 255, 255, 0.91)",
     "darkNative": "rgba(28, 28, 46, 0.91)",
     "sels": [
-      ".chat-body | background-color"
+      ".chat-body | background-color",
+      ".message-list | background-color",
+      ".compact-chat-surface-frame | background-color"
     ]
   },
   "--nts-chat-bg": {
@@ -219,8 +294,8 @@
   "--nts-shell-radius": {
     "kind": "length",
     "gate": true,
-    "native": "14px",
-    "darkNative": "14px",
+    "native": "22px",
+    "darkNative": "22px",
     "sels": [
       "#react-chat-window-shell | border-radius"
     ]
@@ -228,10 +303,11 @@
   "--nts-input-bg": {
     "kind": "color",
     "gate": true,
-    "native": "rgba(255, 255, 255, 0.4)",
-    "darkNative": "rgba(40, 40, 40, 0.55)",
+    "native": "rgba(255, 255, 255, 0.5)",
+    "darkNative": "rgba(40, 40, 40, 0.65)",
     "sels": [
       "#text-input-area | background-color",
+      ".compact-chat-surface-frame | background-color",
       ".composer-input-shell | background-color"
     ]
   },
@@ -374,22 +450,20 @@
   "--nts-popover-bg": {
     "kind": "color",
     "gate": true,
-    "native": "rgba(0, 0, 0, 0)",
-    "darkNative": "rgba(0, 0, 0, 0)",
+    "native": "rgba(255, 255, 255, 0.85)",
+    "darkNative": "rgba(38, 38, 58, 0.78)",
     "sels": [
-      ".composer-icon-popover | background-color",
       ".composer-overflow-popover | background-color",
-      ".composer-overflow-menu | background-color"
+      ".composer-overflow-popover | background-color"
     ]
   },
   "--nts-popover-text": {
     "kind": "color",
     "gate": true,
-    "native": "rgb(34, 34, 34)",
-    "darkNative": "rgb(224, 224, 224)",
+    "native": null,
+    "darkNative": null,
     "sels": [
-      ".composer-icon-popover | color",
-      ".composer-overflow-menu | color"
+      ".composer-overflow-popover | color"
     ]
   },
   "--nts-popover-border": {
@@ -454,9 +528,7 @@
     "darkNative": "rgb(40, 52, 63)",
     "sels": [
       ".proactive-recommendation-card | background-color",
-      ".music-recommendation-icon | background-color",
-      ".compact-export-history-bubble | background-color",
-      ".compact-export-preview-bubble | background-color"
+      ".music-recommendation-icon | background-color"
     ]
   },
   "--nts-rec-radius": {
@@ -483,9 +555,7 @@
     "native": "rgb(52, 75, 93)",
     "darkNative": "rgb(226, 233, 238)",
     "sels": [
-      ".proactive-recommendation-bubble | color",
-      ".compact-export-history-bubble | color",
-      ".compact-export-preview-bubble | color"
+      ".proactive-recommendation-bubble | color"
     ]
   },
   "--nts-highlight": {
@@ -528,7 +598,7 @@
     "darkNative": "none",
     "sels": [
       ".composer-panel | box-shadow",
-      ".composer-icon-popover | box-shadow",
+      ".composer-overflow-popover | box-shadow",
       ".composer-overflow-popover | box-shadow",
       ".modal-dialog | box-shadow",
       ".proactive-recommendation-card | box-shadow",
@@ -546,13 +616,124 @@
       ".agent-plugin-view | border-radius"
     ]
   },
+  "--nts-chat-panel-radius": {
+    "kind": "length",
+    "gate": true,
+    "native": "0px",
+    "darkNative": "0px",
+    "sels": [
+      ".compact-export-history-scroll | border-radius",
+      ".compact-export-history-scroll-content | border-radius",
+      ".message-list | border-radius",
+      ".chat-body | border-radius"
+    ]
+  },
   "--nts-accent-bg": {
+    "kind": "color",
+    "gate": true,
+    "native": "MISSING-ELEMENT",
+    "darkNative": "MISSING-ELEMENT",
+    "sels": [
+      "#agent-content-tasks-tab | background-color"
+    ]
+  },
+  "--nts-glass-filter": {
+    "kind": "filter",
+    "gate": true,
+    "native": "blur(48px) saturate(1.8)",
+    "darkNative": "blur(48px) saturate(1.8)",
+    "sels": [
+      ".window-topbar | backdrop-filter",
+      ".composer-input-shell | backdrop-filter",
+      ".compact-chat-surface-frame | backdrop-filter",
+      ".composer-icon-button | backdrop-filter",
+      ".composer-overflow-popover | backdrop-filter"
+    ]
+  },
+  "--nts-glass-tint": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(255, 255, 255, 0.75)",
+    "darkNative": "rgba(0, 0, 0, 0)",
+    "sels": [
+      ".window-topbar | background-color",
+      ".composer-input-shell | background-color",
+      ".compact-chat-surface-frame | background-color",
+      ".composer-icon-button | background-color",
+      ".composer-overflow-popover | background-color"
+    ]
+  },
+  "--nts-glass-highlight": {
     "kind": "color",
     "gate": true,
     "native": null,
     "darkNative": null,
     "sels": [
-      "#agent-content-tasks-tab | background-color"
+      ".window-topbar | outline-color",
+      ".composer-input-shell | outline-color",
+      ".compact-chat-surface-frame | outline-color",
+      ".composer-icon-button | outline-color"
+    ]
+  },
+  "--nts-bubble-glass-filter": {
+    "kind": "filter",
+    "gate": true,
+    "native": null,
+    "darkNative": null,
+    "sels": [
+      ".message-bubble-user | backdrop-filter",
+      ".message-bubble-assistant | backdrop-filter"
+    ]
+  },
+  "--nts-bubble-glass-tint": {
+    "kind": "color",
+    "gate": true,
+    "native": "rgba(0, 0, 0, 0)",
+    "darkNative": "rgba(0, 0, 0, 0)",
+    "sels": [
+      ".message-bubble-user | background-color",
+      ".message-bubble-assistant | background-color"
+    ]
+  },
+  "--nts-chat-gradient": {
+    "kind": "gradient",
+    "gate": true,
+    "native": "none",
+    "darkNative": "none",
+    "sels": [
+      ".chat-body | background-image",
+      ".message-list | background-image"
+    ]
+  },
+  "--nts-panel-gradient": {
+    "kind": "gradient",
+    "gate": true,
+    "native": null,
+    "darkNative": null,
+    "sels": [
+      ".compact-chat-surface-frame | background-image"
+    ]
+  },
+  "--nts-user-bubble-gradient": {
+    "kind": "gradient",
+    "gate": true,
+    "native": "none",
+    "darkNative": "none",
+    "sels": [
+      ".message.user | background-image",
+      ".message-bubble-user | background-image",
+      ".compact-export-history-message.is-user .compact-export-history-bubble | background-image"
+    ]
+  },
+  "--nts-ai-bubble-gradient": {
+    "kind": "gradient",
+    "gate": true,
+    "native": "none",
+    "darkNative": "none",
+    "sels": [
+      ".message.gemini | background-image",
+      ".message-bubble-assistant | background-image",
+      ".compact-export-history-message.is-assistant .compact-export-history-bubble | background-image"
     ]
   }
 }

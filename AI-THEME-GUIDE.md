@@ -368,7 +368,7 @@ filter 里 blur ≥20px 且带 saturate。文字仍必须压在 tint 之上满�
 **在主题工坊仓库里**（需要本机 Python，用插件自己的离线后端，不依赖宿主）：
 
 ```bash
-python _work/validate_theme.py 你的主题.json
+python tools/validate_theme.py 你的主题.json
 ```
 
 脚本会输出：解析是否成功、被拒的变量与原因、亮/暗变量数、推断出的风格族、
